@@ -1,16 +1,20 @@
 """Detecting "a human resolved the escalation" from `lifecycle status --format json`.
 
 **Deviation from the M7 brief, recorded up front (see `README.md`'s
-"spec-lifecycle reality check" for the full verification):** the brief asks
-this module to "detect a change that has left `Needs human input`" by
-polling `lifecycle status --format json`. Verified against the shipped
-`spec-lifecycle` v0.1.0 CLI (2026-07-07) — the complete v1 verb set is
-`init`/`validate`/`approve`/`status`/`archive`/`guard`; there is no `apply`
-command, and `status`'s `StageState` enum is exactly `pending | approved |
-rejected | skipped` — **`spec-lifecycle` has no "needs human input" concept
-at all**, and per `orchestration.md` sec 7.1 / the implementation plan's P7,
-this is deliberate: "Canonical = Conductor run-state ... spec-lifecycle is
-untouched — its statuses are gates, not run states."
+"spec-lifecycle reality check" for the full, corrected verification):** the
+brief asks this module to "detect a change that has left `Needs human
+input`" by polling `lifecycle status --format json`. Verified against
+`spec-lifecycle`'s real `status` surface (`internal/status/status.go`,
+main `4d1f002`) — `status`'s `StageState` enum is exactly `pending |
+approved | rejected | skipped` — **`spec-lifecycle` has no "needs human
+input" concept at all**, and per `orchestration.md` sec 7.1 / the
+implementation plan's P7, this is deliberate: "Canonical = Conductor
+run-state ... spec-lifecycle is untouched — its statuses are gates, not run
+states." (`spec-lifecycle` main separately ships `lifecycle apply` too, as
+of milestone M3 — see `orchestration/resume/plan.py`'s header docstring —
+but `apply` is the machine-readable plan surface, not a new gate/run-state
+value; it does not change anything about `status`'s state enum or this
+module's reasoning below.)
 
 So this module does NOT (and structurally cannot) watch `lifecycle status`
 for an escalation *signal* — that signal is Conductor's own paused run

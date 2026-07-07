@@ -83,8 +83,8 @@ class ResumeDecision:
 
     action: ResumeAction
     remaining_milestones: list[dict[str, Any]] | None = None
-    completed_milestone_ids: list[str] | None = None
-    stuck_milestone_id: str | None = None
+    completed_milestone_ids: list[int] | None = None
+    stuck_milestone_id: int | None = None
 
 
 def decide(

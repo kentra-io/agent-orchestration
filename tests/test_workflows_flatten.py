@@ -35,16 +35,11 @@ EXECUTE_CHANGE_WORKFLOW = REPO_ROOT / "workflows" / "execute-change.yaml"
 CONDUCTOR_BIN = Path(sys.executable).parent / "conductor"
 
 
-def _write_plan(tmp_path: Path, milestone_ids: list[str]) -> Path:
+def _write_plan(tmp_path: Path, milestone_ids: list[int]) -> Path:
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(
         json.dumps(
-            {
-                "milestones": [
-                    {"milestone_id": mid, "milestone_summary": f"work for {mid}"}
-                    for mid in milestone_ids
-                ]
-            }
+            {"milestones": [{"id": mid, "title": f"work for M{mid}"} for mid in milestone_ids]}
         ),
         encoding="utf-8",
     )
@@ -60,7 +55,7 @@ class TestFlattenKillResume:
         1 has fully completed. `conductor resume` must continue at milestone
         2 without re-executing milestone 1's implementer/gates/verifier.
         """
-        plan_path = _write_plan(tmp_path, ["M1", "M2", "M3"])
+        plan_path = _write_plan(tmp_path, [1, 2, 3])
         script_path = write_stub_script(
             tmp_path / "script",
             {

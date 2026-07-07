@@ -28,15 +28,19 @@
 # and never violates the 3-attempt invariant since each restart is a fresh
 # child run that recounts from zero).
 #
-# read_plan's source: in production this would be a real spec-lifecycle
-# machine-readable plan surface; spec-lifecycle ships no such command today
-# (verified 2026-07-07 against the shipped v0.1.0 CLI -- `init`, `validate`,
-# `approve`, `status`, `archive`, `guard`; no `apply`) -- see
+# read_plan's source: in production this is the real spec-lifecycle
+# machine-readable plan surface, `lifecycle apply <change> --format json`
+# (spec-lifecycle main `4d1f002`, milestone M3 -- see
+# orchestration/resume/plan.py's header docstring and
 # orchestration/resume/README.md's "spec-lifecycle reality check" for the
-# full deviation note. So, as in M5, a fixture JSON file with a `milestones`
-# array stands in -- see tests/fixtures/execute_change_*.json and
-# orchestration/resume/replan.py (M7) for how a *changed* plan's remaining
-# milestones get re-derived into a fresh fixture file.
+# full, corrected account of what this superseded). In the hermetic tier
+# here, a fixture JSON file with a `milestones` array stands in, shaped to
+# match that real per-milestone surface -- `{"id": <int>, "title": <str>,
+# "steps": [...], "contract": {...}}` per milestone (`contract` omitted
+# when absent) -- see orchestration/resume/plan.py's `load_milestones`/
+# `load_milestones_from_apply`/`derive_remaining_milestones` (M7) for how a
+# *changed* plan's remaining milestones get re-derived into a fresh
+# fixture file.
 #
 # Stub tier (hermetic):
 #   CONDUCTOR_STUB_SCRIPT=path/to/script.json \
@@ -60,9 +64,9 @@ workflow:
       required: true
       description: >-
         Path to a fixture JSON file with a `milestones` array (each item:
-        milestone_id, milestone_summary). Stands in for a real machine-
-        readable plan surface (spec-lifecycle ships none today -- see the
-        header note above).
+        id, title, steps, contract). Stands in, in the hermetic tier, for
+        the real `lifecycle apply <change> --format json` machine-readable
+        plan surface -- see the header note above.
     attempt_threshold:
       type: number
       required: false
@@ -123,8 +127,13 @@ agents:
       implementer/orchestrator).
     workflow: milestone.yaml
     input_mapping:
-      milestone_id: "{{ read_plan.output.milestones[cursor.output.index].milestone_id }}"
-      milestone_summary: "{{ read_plan.output.milestones[cursor.output.index].milestone_summary }}"
+      # `milestone.yaml` declares its own `milestone_id`/`milestone_summary`
+      # inputs (a stable, independent contract -- see workflows/milestone.yaml)
+      # -- only the SOURCE expressions below changed (M7 fix): they now pull
+      # `.id`/`.title`, the real per-milestone field names `lifecycle apply`
+      # emits, instead of the invented `.milestone_id`/`.milestone_summary`.
+      milestone_id: "{{ read_plan.output.milestones[cursor.output.index].id }}"
+      milestone_summary: "{{ read_plan.output.milestones[cursor.output.index].title }}"
       attempt_threshold: "{{ workflow.input.attempt_threshold }}"
       gates_l1_command: "{{ workflow.input.gates_l1_command }}"
       notify_dry_run: "{{ workflow.input.notify_dry_run }}"

@@ -74,8 +74,8 @@ class TestInspectEscalationQueue:
         _tmp_dir, _plan_path, _env = _escalated
         result = inspect_escalation_queue(EXECUTE_CHANGE_WORKFLOW)
         assert result is not None
-        assert result["stuck_milestone_id"] == "M2"
-        assert result["completed_milestone_ids"] == ["M1"]
+        assert result["stuck_milestone_id"] == 2
+        assert result["completed_milestone_ids"] == [1]
         assert result["verifier_reports"] == [
             {"pass": False, "notes": "m2 fail 1"},
             {"pass": False, "notes": "m2 fail 2"},
@@ -114,5 +114,5 @@ class TestResolveGate:
         )
         out = resolve_gate(baseline, _status("approved", "2026-07-05T12:00:00Z"), checkpoint_path)
         assert out["action"] == "resume_in_place"
-        assert out["stuck_milestone_id"] == "M2"
-        assert out["completed_milestone_ids"] == ["M1"]
+        assert out["stuck_milestone_id"] == 2
+        assert out["completed_milestone_ids"] == [1]

@@ -10,27 +10,41 @@ This package is that poll-seam. Read this before wiring a real launcher
 against it — several design choices here deviate from (or sharpen) the
 M7 brief's literal wording, for reasons recorded below.
 
-## Spec-lifecycle reality check (verified 2026-07-07 against the shipped v0.1.0 CLI)
+## Spec-lifecycle reality check (corrected 2026-07-07 — supersedes this package's original M7 verification)
 
 The brief asks this module to "detect a change that has left `Needs human
 input`" via `lifecycle status --format json`. Verified directly against
-`spec-lifecycle`'s source (`cmd/lifecycle/main.go`, `internal/status/status.go`):
+`spec-lifecycle`'s source (`cmd/lifecycle/main.go`, `internal/status/status.go`,
+`cmd/lifecycle/apply.go`, `internal/validate/plan.go`, main `4d1f002`):
 
-- The complete, shipped v1 verb set is exactly `init`, `validate`, `approve`,
-  `status`, `archive`, `guard`. **There is no `apply` command.** The
-  `execute-change.yaml` workflow's `read_plan` step therefore still reads a
-  fixture JSON, same as M5 — not a real machine-readable plan surface.
 - `status --format json`'s real shape is
   `{"changes": [{"change": ..., "gates": [{"stage": ..., "state": ...,
   "approvedAt": ..., "drifted": [...]}]}]}`. The `state` (`StageState`) enum
   is **exactly** `pending | approved | rejected | skipped` — there is no
   "needs human input" / escalation / paused value anywhere in it.
+- **`spec-lifecycle` main also ships `lifecycle apply <change> --format
+  json`** (milestone M3, "execution-handoff") — a real, machine-readable
+  plan surface: each milestone's `id`/`title`/`steps`, plus an optional
+  structured `contract` (`check`/`criteria`/`paths` — the executable
+  acceptance check, plain-language criteria, and diff-confined-paths
+  declaration the harness's L1/L3/diff-paths checks consume). **This
+  package's original M7 claim — "there is no `apply`/machine-readable-plan
+  command at all, verified against the shipped v0.1.0 CLI" — was true only
+  of the `v0.1.0` tag this repo was pinned against at the time, and was
+  stale by the time M7 actually landed.** `orchestration/resume/plan.py`'s
+  `load_milestones_from_apply` is the (now corrected) production adapter
+  over this real surface; `execute-change.yaml`'s `read_plan` step still
+  reads a fixture JSON in the hermetic tier (see that workflow's header
+  comment), shaped to match `apply`'s real per-milestone shape.
 
-This is not an oversight to work around — it is the locked design (P7 in
-`implementation-plan.md`, sec 7.1 in `orchestration.md`): **"Canonical =
-Conductor run-state ... spec-lifecycle is untouched — its statuses are
-gates, not run states."** `spec-lifecycle` was never meant to model
-Conductor's escalation; this package doesn't ask it to.
+The "no 'needs human input' concept in `status`" finding above is NOT
+affected by this correction — `apply` is a plan surface, not a run-state
+value, and does not add anything to `status`'s `StageState` enum. It is
+still the locked design (P7 in `implementation-plan.md`, sec 7.1 in
+`orchestration.md`): **"Canonical = Conductor run-state ... spec-lifecycle
+is untouched — its statuses are gates, not run states."** `spec-lifecycle`
+was never meant to model Conductor's escalation; this package doesn't ask
+it to.
 
 So `orchestration.resume.lifecycle_status` watches `status --format json`
 for a different, real signal: the change's `plan` stage gate being
@@ -109,10 +123,11 @@ history.
 
 ## What's NOT covered here (explicit scope notes)
 
-- **A real `lifecycle approve` round-trip.** Tests fabricate the
-  `status --format json` payload directly rather than driving a real
-  `spec-lifecycle` change through its stages — that's `spec-lifecycle`'s
-  own test surface, not this module's.
+- **A real `lifecycle apply`/`lifecycle approve` round-trip.** Tests inject
+  fixture files (`plan.load_milestones`) rather than driving a real
+  `spec-lifecycle` change through its stages and calling
+  `plan.load_milestones_from_apply` against a live `lifecycle` binary —
+  that's `spec-lifecycle`'s own test surface, not this module's.
 - **The live `--web-bg`/HTTP gate-respond path.** Documented above as a real
   alternative Conductor supports, but not exercised or wired here — the
   crash-then-resume path is what this package implements and tests.

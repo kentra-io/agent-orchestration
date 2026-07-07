@@ -56,18 +56,18 @@ class ExecuteChangeCheckpoint:
     `cursor` has not run yet, e.g. a checkpoint taken at `read_plan`)."""
 
     @property
-    def completed_milestone_ids(self) -> list[str]:
+    def completed_milestone_ids(self) -> list[int]:
         """IDs of milestones already committed to context (never re-run on resume)."""
-        return [m["milestone_id"] for m in self.milestones[: self.cursor_index]]
+        return [m["id"] for m in self.milestones[: self.cursor_index]]
 
     @property
-    def stuck_milestone_id(self) -> str | None:
+    def stuck_milestone_id(self) -> int | None:
         """The milestone id the run is paused/stuck on, or `None` if between milestones."""
         if self.current_agent != "milestone_step":
             return None
         if self.cursor_index >= len(self.milestones):
             return None
-        return self.milestones[self.cursor_index]["milestone_id"]
+        return self.milestones[self.cursor_index]["id"]
 
 
 def find_latest_checkpoint(workflow_path: str | Path) -> Path | None:

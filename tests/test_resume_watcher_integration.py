@@ -113,8 +113,8 @@ class TestResumeInPlaceUnchangedPlan:
         resolved_status = _status("approved", "2026-07-05T12:00:00Z")  # fresh approvedAt
         decision = decide(baseline, resolved_status, checkpoint_path)
         assert decision.action == "resume_in_place"
-        assert decision.completed_milestone_ids == ["M1"]
-        assert decision.stuck_milestone_id == "M2"
+        assert decision.completed_milestone_ids == [1]
+        assert decision.stuck_milestone_id == 2
 
         # The action: a real `conductor resume --skip-gates`. The stub
         # script's verifier list resets to index 0 in the fresh process --
@@ -142,20 +142,23 @@ class TestFreshRunOverRemainingChangedPlan:
     ) -> None:
         tmp_dir, plan_path, env, checkpoint_path, baseline = _escalated_run
 
-        # Simulate the Mode-A edit: the human reworked M2's summary and
-        # added a brand-new M2b -- a materially different plan artifact.
+        # Simulate the Mode-A edit: the human reworked milestone 2's title
+        # and added a brand-new milestone 4 -- a materially different plan
+        # artifact. (Milestone ids are the real spec-lifecycle shape's
+        # heading numbers, not positional -- the newly-inserted milestone
+        # gets a fresh id, 4, even though it sits between 2 and 3.)
         edited_plan = tmp_path / "plan_edited.json"
         edited_plan.write_text(
             json.dumps(
                 {
                     "milestones": [
-                        {"milestone_id": "M1", "milestone_summary": "work for M1"},
-                        {"milestone_id": "M2", "milestone_summary": "REWORKED scope for M2"},
+                        {"id": 1, "title": "work for M1"},
+                        {"id": 2, "title": "REWORKED scope for M2"},
                         {
-                            "milestone_id": "M2b",
-                            "milestone_summary": "a new milestone the human added",
+                            "id": 4,
+                            "title": "a new milestone the human added",
                         },
-                        {"milestone_id": "M3", "milestone_summary": "work for M3"},
+                        {"id": 3, "title": "work for M3"},
                     ]
                 }
             ),
@@ -172,9 +175,9 @@ class TestFreshRunOverRemainingChangedPlan:
         resolved_status = _status("approved", "2026-07-05T12:00:00Z")
         decision = decide(baseline, resolved_status, checkpoint_path)
         assert decision.action == "fresh_run_remaining"
-        assert decision.completed_milestone_ids == ["M1"]
-        assert [m["milestone_id"] for m in decision.remaining_milestones] == ["M2", "M2b", "M3"]
-        assert decision.remaining_milestones[0]["milestone_summary"] == "REWORKED scope for M2"
+        assert decision.completed_milestone_ids == [1]
+        assert [m["id"] for m in decision.remaining_milestones] == [2, 4, 3]
+        assert decision.remaining_milestones[0]["title"] == "REWORKED scope for M2"
 
         # The action: write the filtered fixture, `conductor run` fresh over
         # it. A fresh script (M2's rework passes solo, M2b and M3 pass too)
@@ -196,11 +199,11 @@ class TestFreshRunOverRemainingChangedPlan:
         )
         assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
         output = _parse_output_json(result.stdout)
-        # 3 remaining milestones (M2, M2b, M3) -- M1 is never scheduled again.
+        # 3 remaining milestones (2, 4, 3) -- milestone 1 is never scheduled again.
         assert output["milestones_processed"] == 3
 
         remaining_written = load_milestones(tmp_path / "remaining_plan.json")
-        assert [m["milestone_id"] for m in remaining_written] == ["M2", "M2b", "M3"]
+        assert [m["id"] for m in remaining_written] == [2, 4, 3]
 
 
 class TestPollUntilResolved:

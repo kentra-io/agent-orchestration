@@ -33,16 +33,11 @@ CONDUCTOR_BIN = Path(sys.executable).parent / "conductor"
 VENV_BIN = Path(sys.executable).parent
 
 
-def _write_plan(tmp_path: Path, milestone_ids: list[str]) -> Path:
+def _write_plan(tmp_path: Path, milestone_ids: list[int]) -> Path:
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(
         json.dumps(
-            {
-                "milestones": [
-                    {"milestone_id": mid, "milestone_summary": f"work for {mid}"}
-                    for mid in milestone_ids
-                ]
-            }
+            {"milestones": [{"id": mid, "title": f"work for M{mid}"} for mid in milestone_ids]}
         ),
         encoding="utf-8",
     )
@@ -66,7 +61,7 @@ def _produce_escalated_and_crashed_run(tmp_path: Path) -> tuple[Path, Path, dict
     that entirely -- what these tests need to prove (M1 never re-runs; the
     retry actually re-attempts M2) doesn't need a 3rd milestone.
     """
-    plan_path = _write_plan(tmp_path, ["M1", "M2"])
+    plan_path = _write_plan(tmp_path, [1, 2])
     script_path = write_stub_script(
         tmp_path / "script",
         {
@@ -140,8 +135,8 @@ class TestExecuteChangeCheckpoint:
 
         ckpt = load_execute_change_checkpoint(checkpoint_path)
         assert ckpt.current_agent == "milestone_step"
-        assert ckpt.stuck_milestone_id == "M2"
-        assert ckpt.completed_milestone_ids == ["M1"]
+        assert ckpt.stuck_milestone_id == 2
+        assert ckpt.completed_milestone_ids == [1]
 
 
 class TestReadVerifierReports:
