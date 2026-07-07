@@ -1,0 +1,10 @@
+{
+  "steps": {
+    "echoer": [
+      {"content": {"ok": true, "note": "m1b-step-one-ok"}, "tokens_used": 42}
+    ],
+    "confirmer": [
+      {"content": {"confirmed": true, "echoed_note": "m1b-step-one-ok"}, "tokens_used": 37}
+    ]
+  }
+}
