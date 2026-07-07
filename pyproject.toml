@@ -36,3 +36,8 @@ select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# tests/fixtures/testbed/ is a *template* (materialized into a throwaway repo
+# at test time by tests/testbed.py) - it is not meant to be collected in
+# place, and its test_flaky.py is deliberately flaky if run against a
+# leftover/unmanaged counter file.
+norecursedirs = ["fixtures"]
