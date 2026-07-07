@@ -52,7 +52,7 @@ Each checker is a module `orchestration.harness.<name>` that is:
    This is what makes "same input -> same verdict" a testable property
    instead of an aspiration - see `tests/test_harness_determinism.py`.
 
-## The five checkers
+## The five checkers (plus one aggregator)
 
 | Module | Purpose | Pass/fail meaning |
 |---|---|---|
@@ -61,6 +61,12 @@ Each checker is a module `orchestration.harness.<name>` that is:
 | `diff_paths` | is the diff confined to the milestone's declared path-set | `pass` = no file outside `allowed_globs` |
 | `deviation_check` | is every out-of-path change covered by a logged deviation | `pass` = no undeclared out-of-path change |
 | `flakiness` | rerun a command N times, quarantine if pass-rate < threshold | `quarantined` (not `pass`) = pass-rate < threshold |
+| `gates` | composes l1+l2+diff_paths+deviation_check into one verdict for a single Conductor `script` step (M5's `milestone.yaml` `gates` step) | `pass` = l1 and l2 and (diff_paths, or deviation_check covers every out-of-path file) |
+
+`gates` follows the same calling convention as the five checkers above (see
+its own docstring for the exact input/output shape) - it exists purely so a
+workflow author wires **one** `script` step instead of four, with routing on
+that one step's exit code (see `workflows/milestone.yaml`).
 
 Full input/output JSON shapes are documented in each module's own
 docstring (`l1_acceptance.py`, `l2_healthcheck.py`, `diff_paths.py`,

@@ -1,0 +1,257 @@
+# milestone.yaml -- the 3-attempt escalation ladder for ONE spec-lifecycle
+# milestone (M5: "the fine-direct demo").
+#
+# implementer -> gates -> verifier -> [$end | counter] -> [orchestrator | escalate]
+#                  ^                                           |
+#                  +------------------ (loop back) ------------+
+#
+# Locked semantics (orchestration.md sec 4, implementation-plan.md P5):
+#   - Exactly 3 resolution attempts: 1 solo + 2 orchestrator-guided.
+#   - Conductor (not the Orchestrator agent) owns the counter and the
+#     threshold flip to escalation -- the `counter` set-step + its routes.
+#   - `gates` (the deterministic M4 harness aggregator) is routed on its
+#     EXIT CODE, never a `pass` JSON field (flakiness has no `pass` key;
+#     exit code is the one uniform signal every harness checker shares).
+#   - `retry:` on the provider-backed steps is for TRANSIENT provider
+#     errors only (provider_error/timeout) -- orthogonal to the ladder;
+#     the `counter` set-step is the ONLY thing that counts resolution
+#     attempts. See workflows/README.md for a load-bearing caveat: the
+#     StubProvider (hermetic tier) does not itself implement retry (that
+#     lives per-provider, e.g. claude.py/claudebox.py) -- `retry:` here is
+#     the real wiring for the live tier; the hermetic tests prove the
+#     structural separation (a provider error never reaches `counter`),
+#     not the provider-level retry loop itself.
+#
+# Runnable standalone (this file IS the root workflow -- see
+# workflows/README.md "Why milestone.yaml is not nested" for why: Conductor
+# only periodic-checkpoints the ROOT engine, so this must run at depth 0 for
+# the crash-safe counter claim (P4) to hold).
+#
+# Stub tier (hermetic, no box/LLM/network -- this is how M5's DoD is proven):
+#   CONDUCTOR_STUB_SCRIPT=path/to/script.json \
+#     TMPDIR=<persistent-dir> conductor run workflows/milestone.yaml \
+#       --provider stub --input milestone_id=M1
+#
+# Live tier (M6+, real cast, real box -- not run in default CI):
+#   TMPDIR=<persistent-dir> conductor run workflows/milestone.yaml \
+#     --input milestone_id=M1 --input milestone_summary="..."
+
+workflow:
+  name: milestone-ladder
+  description: The 3-attempt escalation ladder for one spec-lifecycle milestone.
+  version: "1.0.0"
+  entry_point: implementer
+
+  runtime:
+    provider: claudebox # production default; hermetic tests override via `--provider stub`
+    checkpoint:
+      every_agent: true # P4/ADR-0002 -- crash-safe, not just failure-only
+
+  input:
+    milestone_id:
+      type: string
+      required: true
+      description: Identifier for this milestone (used in prompts/labels/events).
+    milestone_summary:
+      type: string
+      required: false
+      default: ""
+      description: Plain-language task + acceptance criteria for this milestone.
+    attempt_threshold:
+      type: number
+      required: false
+      default: 3
+      description: Ladder threshold (locked default 3 -- 1 solo + 2 orchestrator-guided).
+    gates_l1_command:
+      type: string
+      required: false
+      default: "exit 0"
+      description: >-
+        The milestone's L1 acceptance-check command (exit-code gated). M5
+        control-flow tests leave this at the trivial always-pass default and
+        drive pass/fail entirely through the (stub-scripted) Verifier; a real
+        wiring (M6+) templates the milestone's actual validation-contract
+        command here.
+    notify_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        Skip the real `gh` call in the `escalate` step (hermetic default).
+        Flip to false only in the live tier (M7+), alongside notify_repo/notify_issue.
+    notify_repo:
+      type: string
+      required: false
+      description: '"owner/repo" for the escalate step''s GitHub-label mirror (live tier only).'
+    notify_issue:
+      type: number
+      required: false
+      description: Issue number for the escalate step's GitHub-label mirror (live tier only).
+
+  limits:
+    # 3 attempts * 3 provider/script steps (implementer/gates/verifier) + 2
+    # orchestrator resolutions + counter + escalate + human_gate, with
+    # headroom (P4: "computed from the plan, generously oversized").
+    max_iterations: 20
+
+agents:
+  - name: implementer
+    description: Does the milestone's work -- solo on attempt 1, guided by the Orchestrator on attempts 2-3.
+    model: sonnet # placeholder cast/model assignment -- M6 builds the real personas
+    input:
+      - workflow.input.milestone_id
+      - workflow.input.milestone_summary
+      - orchestrator.output?
+    prompt: |
+      Milestone: {{ workflow.input.milestone_id }}
+      {{ workflow.input.milestone_summary }}
+
+      {% if orchestrator is defined and orchestrator.output %}
+      Guidance from a prior failed attempt:
+      {{ orchestrator.output.guidance }}
+      {% endif %}
+
+      Do the work for this milestone only, then report a summary of your diff.
+    output:
+      diff_summary:
+        type: string
+        description: Summary of what was changed for this milestone.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      delay_seconds: 1
+      retry_on: [provider_error, timeout]
+    routes:
+      - to: gates
+
+  - name: gates
+    type: script
+    description: >-
+      Deterministic verification (M4 harness) -- composes L1 + L2 +
+      diff-confined-paths + deviation cross-check via
+      orchestration.harness.gates. Routed on EXIT CODE, not `pass`.
+    command: python3
+    args: ["-m", "orchestration.harness.gates"]
+    stdin: '{"l1": {"command": "{{ workflow.input.gates_l1_command }}"}}'
+    routes:
+      - to: verifier
+
+  - name: verifier
+    description: >-
+      Fresh, author != verifier judgment (coverage matrix, L3, intent-vs-actual).
+      M5 stub cast; the real behavioral contract lands in M6.
+    model: sonnet
+    input:
+      - implementer.output
+      - gates.output
+    prompt: |
+      Milestone: {{ workflow.input.milestone_id }}
+      Implementer's diff summary: {{ implementer.output.diff_summary }}
+      Gates verdict (exit_code {{ gates.output.exit_code }}): {{ gates.output.report | tojson }}
+
+      Judge the milestone against its acceptance criteria. PASS only if
+      coverage is fully met, gates are green, and no undeclared deviation exists.
+    output:
+      pass:
+        type: boolean
+        description: PASS only if coverage is fully met, gates are green, and no undeclared deviation exists.
+      notes:
+        type: string
+        description: Rationale, or what's missing.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      delay_seconds: 1
+      retry_on: [provider_error, timeout]
+    routes:
+      # Gates is a deterministic script step -- route on its EXIT CODE, not
+      # a `pass` JSON field (flakiness has no `pass` key; exit code is the
+      # one uniform signal every harness checker shares). Verifier is the
+      # judging step -- it legitimately exposes a `pass` field.
+      - to: "$end"
+        when: "{{ gates.output.exit_code == 0 and verifier.output.pass }}"
+      - to: counter
+
+  - name: counter
+    type: set
+    description: >-
+      Crash-safe attempt counter (P5) -- Conductor, not the Orchestrator
+      agent, owns this and the threshold flip. The ONLY thing that counts
+      resolution attempts (native `retry:` above is transient-error-only
+      and orthogonal to this).
+    values:
+      attempts: "{{ (counter.output.attempts if counter is defined else 0) + 1 }}"
+    routes:
+      - to: orchestrator
+        when: "{{ output.attempts < (workflow.input.attempt_threshold | default(3) | int) }}"
+      - to: escalate
+
+  - name: orchestrator
+    description: >-
+      Stateless resolution step -- emits next-attempt guidance. Does NOT
+      decide human-escalation (Conductor's counter/routes do that).
+    model: sonnet
+    input:
+      - verifier.output
+      - implementer.output
+      - counter.output
+    prompt: |
+      Milestone {{ workflow.input.milestone_id }} failed attempt {{ counter.output.attempts }}.
+      Verifier notes: {{ verifier.output.notes }}
+      Implementer's diff summary: {{ implementer.output.diff_summary }}
+
+      Emit guidance for the next attempt (re-scope, supply missing context,
+      tighten instructions, or re-order). Do not decide whether to escalate.
+    output:
+      guidance:
+        type: string
+        description: Next-attempt guidance for the Implementer.
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      delay_seconds: 1
+      retry_on: [provider_error, timeout]
+    routes:
+      - to: implementer
+
+  - name: escalate
+    type: script
+    description: >-
+      `Needs human input` (P7) -- GitHub-label mirror. The CANONICAL pause
+      is the `human_gate` step that follows; this only mirrors the status
+      to a label for humans scanning issues, not run logs.
+    command: python3
+    args: ["-m", "orchestration.launch.notify_escalation"]
+    stdin: >-
+      {{ {"label": "needs-human-input", "dry_run": workflow.input.notify_dry_run,
+      "repo": workflow.input.notify_repo, "issue": workflow.input.notify_issue} | tojson }}
+    routes:
+      - to: human_gate
+
+  - name: human_gate
+    type: human_gate
+    description: >-
+      Needs human input -- parked here until a Mode-A session resolves the
+      escalation. This is the canonical pause (spec sec 7.1/7.2); the real
+      poll+resume seam (watch for resolution, `conductor resume` from the
+      failed milestone) is M7's `orchestration/resume/`.
+    prompt: |
+      Milestone {{ workflow.input.milestone_id }} exhausted its
+      {{ workflow.input.attempt_threshold | default(3) }}-attempt ladder.
+
+      Verifier notes: {{ verifier.output.notes }}
+
+      A human must resolve this in a Mode-A session before the change can
+      resume (see the orchestration-resume poll-seam, M7).
+    options:
+      - label: "Acknowledge (resolution happens out-of-band -- M7's poll+resume seam)"
+        value: acknowledged
+        route: "$end"
+
+output:
+  milestone_id: "{{ workflow.input.milestone_id }}"
+  passed: "{{ gates.output.exit_code == 0 and verifier.output.pass }}"
+  attempts: "{{ counter.output.attempts if counter is defined else 0 }}"
+  escalated: "{{ true if human_gate is defined else false }}"
+  escalation_label: "{{ escalate.output.label if escalate is defined else '' }}"
+  escalation_notified: "{{ escalate.output.notified if escalate is defined else false }}"
