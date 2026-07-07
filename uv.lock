@@ -24,7 +24,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "conductor-cli", git = "https://github.com/kentra-io/conductor.git?rev=50d2b59bbabbb204c85fdff32d1ef569bb78f9b9" }]
+requires-dist = [{ name = "conductor-cli", git = "https://github.com/kentra-io/conductor.git?rev=5461008b7d5adf0beae30f9459e4b088c9d4d7f9" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -210,7 +210,7 @@ wheels = [
 [[package]]
 name = "conductor-cli"
 version = "0.1.20"
-source = { git = "https://github.com/kentra-io/conductor.git?rev=50d2b59bbabbb204c85fdff32d1ef569bb78f9b9#50d2b59bbabbb204c85fdff32d1ef569bb78f9b9" }
+source = { git = "https://github.com/kentra-io/conductor.git?rev=5461008b7d5adf0beae30f9459e4b088c9d4d7f9#5461008b7d5adf0beae30f9459e4b088c9d4d7f9" }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi" },

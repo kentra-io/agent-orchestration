@@ -1,0 +1,99 @@
+# M1b live-integration smoke test: 2-step ClaudeboxProvider workflow.
+#
+# Proves the real seam: `conductor run` -> ClaudeboxProvider.execute() ->
+# `cb exec [--workdir <worktree>] <box> claude -p ... --agent <role> ...`
+# against a real claudebox box, with a declared `output:` schema on both
+# steps (structured output) and durability config mandated by P4/ADR-0002.
+#
+# `box` / `worktree` are workflow inputs (see the CONTEXT_SEEDING note
+# below) rather than context values set by an internal step, because
+# Conductor's WorkflowContext never exposes a bare top-level context key
+# from a declarative script/set step -- only `workflow.input.*` and
+# per-step `{name}.output.*`. ClaudeboxProvider (kentra-patches @ M1b)
+# falls back to `context["workflow"]["input"]["box"/"worktree"]` when the
+# flat key is absent, so this is the CLI-compatible mechanism:
+#
+#   conductor run workflow.yaml --input box=<container-name> \
+#                                --input worktree=<absolute-worktree-path>
+#
+# The box must already be running (created out-of-band via `cb run`/`cb
+# worktree create`) and have a hand-materialized persona at
+# `<worktree>/.claude/agents/<role>.md` for each step name below
+# (`echoer`, `confirmer` -- P9: hand-materialized personas, not agentdef).
+#
+# Stub tier (hermetic, no box/LLM/network):
+#   CONDUCTOR_STUB_SCRIPT=tests/fixtures/m1b_stub_script.json \
+#     conductor run workflow.yaml --provider stub \
+#       --input box=unused --input worktree=unused
+#
+# Live tier (costs money; not run in default CI):
+#   TMPDIR=<persistent-dir> conductor run workflow.yaml \
+#     --input box=<box-name> --input worktree=<worktree-path>
+
+workflow:
+  name: m1b-claudebox-smoke
+  description: 2-step live ClaudeboxProvider smoke test (M1/M1b DoD)
+  version: "1.0.0"
+  entry_point: echoer
+
+  runtime:
+    provider: claudebox
+    checkpoint:
+      every_agent: true # P4/ADR-0002: crash-safe, not just failure-only
+
+  input:
+    box:
+      type: string
+      required: true
+      description: claudebox box/container id that `cb exec` targets
+    worktree:
+      type: string
+      required: false
+      description: absolute worktree path forwarded as `cb exec --workdir`
+
+  limits:
+    # 2 milestones worth of headroom (>= milestones * 4 + overhead, P4) --
+    # generously oversized for a fixed 2-step smoke workflow.
+    max_iterations: 10
+
+agents:
+  - name: echoer
+    description: Step 1 -- produces a structured, deterministic note.
+    model: haiku
+    prompt: |
+      Respond with a single JSON object matching the declared output
+      schema. Set `ok` to true and `note` to the literal string
+      "m1b-step-one-ok". Do not add any other text.
+    output:
+      ok:
+        type: boolean
+        description: Whether step one succeeded.
+      note:
+        type: string
+        description: A short deterministic note for step two to echo back.
+    routes:
+      - to: confirmer
+
+  - name: confirmer
+    description: Step 2 -- consumes step one's structured output and confirms it.
+    model: haiku
+    prompt: |
+      A prior step reported: ok={{ echoer.output.ok }}, note="{{ echoer.output.note }}".
+
+      Respond with a single JSON object matching the declared output
+      schema. Set `confirmed` to true only if ok was true, and echo the
+      note back verbatim in `echoed_note`. Do not add any other text.
+    output:
+      confirmed:
+        type: boolean
+        description: Whether step one's success was confirmed.
+      echoed_note:
+        type: string
+        description: The note from step one, echoed back verbatim.
+    routes:
+      - to: $end
+
+output:
+  note: "{{ echoer.output.note }}"
+  confirmed: "{{ confirmer.output.confirmed }}"
+  echoed_note: "{{ confirmer.output.echoed_note }}"
