@@ -1,0 +1,111 @@
+# execute-change.yaml -- reads a spec-lifecycle plan and sequences its
+# milestones through the milestone.yaml ladder (M5 sec 4 sketch).
+#
+# read_plan -> milestone_runs (for_each, max_concurrent: 1 -> sequential,
+#              S1 spike) -> milestone.yaml per item -> finish
+#
+# IMPORTANT crash-safety caveat (verified against the fork's own source,
+# see workflows/README.md "Why milestone.yaml is not nested" for the full
+# citation): Conductor only takes periodic (`every_agent`) checkpoints at
+# the ROOT engine (`_subworkflow_depth == 0`); a `type: workflow` step's
+# child run is executed as one atomic unit from the parent's perspective
+# and is "re-run from scratch on resume" (the fork's own docstring, verbatim)
+# if the process dies mid-child. That means: a crash mid-milestone HERE
+# restarts that one milestone's ladder from attempt 1 on `conductor resume`
+# -- already-completed milestones are unaffected (the for_each item boundary
+# IS a root-level step boundary, and IS checkpointed). This is a materially
+# weaker crash-safety unit than milestone.yaml run standalone (which is
+# fully crash-safe attempt-by-attempt, proven by the M5 kill/resume test) --
+# flagged here and in the M5 report rather than silently assumed away. A
+# fix (route-chaining the ladder directly into this file's root, forgoing
+# `type: workflow` nesting) is available but out of scope for M5; M7/M8
+# should revisit if per-attempt crash-safety across a whole change is required.
+#
+# read_plan's source: in production this is `lifecycle apply <change>
+# --format json` (spec-lifecycle sec 5.5); for M5 (and the hermetic tier
+# generally) a fixture JSON file with a `milestones` array is read directly
+# -- see tests/fixtures/execute_change_*.json.
+#
+# Stub tier (hermetic):
+#   CONDUCTOR_STUB_SCRIPT=path/to/script.json \
+#     TMPDIR=<persistent-dir> conductor run workflows/execute-change.yaml \
+#       --provider stub --input plan_fixture_path=tests/fixtures/execute_change_2_milestones.json
+
+workflow:
+  name: execute-change
+  description: Sequences a spec-lifecycle change's milestones through the ladder.
+  version: "1.0.0"
+  entry_point: read_plan
+
+  runtime:
+    provider: claudebox
+    checkpoint:
+      every_agent: true # P4/ADR-0002 -- see the crash-safety caveat above re: nested milestones
+
+  input:
+    plan_fixture_path:
+      type: string
+      required: true
+      description: >-
+        Path to a fixture JSON file with a `milestones` array (each item:
+        milestone_id, milestone_summary). Stands in for the real
+        `lifecycle apply --format json` surface (spec-lifecycle sec 5.5, M3).
+    attempt_threshold:
+      type: number
+      required: false
+      default: 3
+    gates_l1_command:
+      type: string
+      required: false
+      default: "exit 0"
+    notify_dry_run:
+      type: boolean
+      required: false
+      default: true
+
+  limits:
+    # computed per P4: milestones * 4 + overhead. Sized generously for the
+    # 10-milestone max_iterations DoD test; individual milestone ladders
+    # have their own (separate) budget inside their own sub-workflow run.
+    max_iterations: 60
+
+agents:
+  - name: read_plan
+    type: script
+    description: Emits the change's milestones (fixture JSON in M5's hermetic tier).
+    command: cat
+    args: ["{{ workflow.input.plan_fixture_path }}"]
+    routes:
+      - to: milestone_runs
+
+  - name: finish
+    type: set
+    description: Change-level finish placeholder (full healthcheck + archive hand-off is M8's scope).
+    value: "all_milestones_complete"
+    routes:
+      - to: "$end"
+
+for_each:
+  - name: milestone_runs
+    type: for_each
+    description: Run every milestone's ladder, in order (S1 spike -- max_concurrent 1).
+    source: read_plan.output.milestones
+    as: milestone
+    max_concurrent: 1 # sequential -- S1: confirmed to preserve list order at the pin (see report)
+    failure_mode: fail_fast
+    agent:
+      name: milestone_runner
+      type: workflow
+      workflow: milestone.yaml
+      input_mapping:
+        milestone_id: "{{ milestone.milestone_id }}"
+        milestone_summary: "{{ milestone.milestone_summary }}"
+        attempt_threshold: "{{ workflow.input.attempt_threshold }}"
+        gates_l1_command: "{{ workflow.input.gates_l1_command }}"
+        notify_dry_run: "{{ workflow.input.notify_dry_run }}"
+    routes:
+      - to: finish
+
+output:
+  milestones_processed: "{{ milestone_runs.outputs | length }}"
+  status: "{{ finish.output }}"
