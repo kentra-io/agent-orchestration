@@ -1,0 +1,3 @@
+c808108003aae3e358ad6e9d6ac6046d94cab4318cddcb24c19f75edf37ef350  ADR-0001-fork-conductor-at-a-pinned-sha-rebase-only-deliberately.md
+14f7b915e05cf723074833caf8859e8912c71bb09ed789f80ee3f42d3516557e  ADR-0002-every-shipped-workflow-template-pins-durability-config.md
+55d731944416f430b442f6e1a55f686dbe80b504eb5d40b70a5f9f7197d3a7f4  ADR-0003-engine-dictated-python-deterministic-harness-stays-script-step-shaped.md

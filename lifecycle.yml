@@ -1,0 +1,16 @@
+schemaVersion: 1
+specFormat:
+    convention: openspec
+    grammar: 1.5.0
+constitution:
+    version: 0.1.x
+consentPolicy: strict
+planGranularity: medium
+sourceTracking:
+    type: none
+    repo: ""
+changeNaming: <issue-number>-<slug>
+runtimes:
+    - claude-code
+    - cursor
+    - codex

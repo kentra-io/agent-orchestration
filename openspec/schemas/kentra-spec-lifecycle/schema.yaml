@@ -1,0 +1,161 @@
+# kentra-spec-lifecycle — the natively-owned artifact schema
+# (spec-lifecycle.md §4, implementation-plan.md §2.2).
+#
+# FORMAT-COMPATIBILITY + DOCUMENTATION ONLY. Nothing in `lifecycle` reads
+# this file back at runtime: the artifact set, its requires: DAG, and stage
+# gating are all enforced by lifecycle's own gate records
+# (approval-state.json) and `lifecycle validate` (internal/validate), never
+# by a schema interpreter — deliberately, so this primitive never grows the
+# `[experimental]` custom-schema-loader risk class OpenSpec itself carries
+# (implementation-plan.md §0.5/§11). This file exists so an
+# `openspec/`-formatted tree stays re-adoptable and human-readable by any
+# tool that DOES read OpenSpec-shaped project-local schema descriptors
+# (mirrors the on-disk shape of `@fission-ai/openspec` v1.5.0's own
+# `schemas/spec-driven/schema.yaml` — confirmed against
+# src/core/artifact-graph/resolver.ts and the packaged spec-driven schema at
+# tag v1.5.0 / commit 546224e).
+name: kentra-spec-lifecycle
+version: 1
+description: >-
+  kentra's staged, gated issue lifecycle — refine (proposal + specs delta) →
+  design (design.md + ADR proposals) → plan (tasks.md) → archive (fold into
+  the living spec). See spec-lifecycle.md §3–§4.
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: >-
+      Why / What Changes / Impact, with the issue reference and any
+      design-skip proposal in frontmatter (spec-lifecycle.md §4, §10).
+    template: proposal.md
+    instruction: |
+      Create proposal.md — the refine-stage artifact gated at gate 1.
+
+      Frontmatter (required):
+      - `issue`: the source-tracking join key, e.g. "kentra-io/kafka-dq#42"
+        (spec-lifecycle.md §10 sourceTracking). Required, non-empty.
+      - `designSkip`: true if this change is small, local, and
+        architecturally inert enough to propose skipping the design stage
+        (spec-lifecycle.md §3.2). The human approves or rejects the
+        proposal at gate 1; the recorded decision lives in that gate's
+        approval-state.json entry (`designSkipped`), not here.
+      - `type`: `feature` (default) or `bug` — the change type recorded at
+        intake (spec-lifecycle.md §8, §0's Stage glossary). `lifecycle
+        approve`/`status` key the bug-vs-feature gate set off this field,
+        not a fixed stage list (implementation-plan.md §2.11). A bug's
+        proposal.md carries the repro description + failing-test pointer
+        instead of Why/What Changes/Impact (spec-lifecycle.md §8).
+
+      Body sections:
+      - **Why** — 1-2 sentences: what problem does this solve, why now?
+      - **What Changes** — bullet list. Call out any brand-new capability
+        and any existing capability whose REQUIREMENTS are changing; each
+        needs a specs/<capability>/spec.md delta in this change folder.
+      - **Impact** — affected code, APIs, dependencies, systems.
+
+      `lifecycle validate --stage refine` checks the frontmatter is present
+      and well-formed with a non-empty `issue` field; it does not grade the
+      prose.
+    requires: []
+
+  - id: specs
+    generates: "specs/**/spec.md"
+    description: >-
+      The requirements artifact: one delta file per touched capability,
+      functional and non-functional requirements merged (spec-lifecycle.md
+      §4.1).
+    template: spec.md
+    instruction: |
+      Create one specs/<capability>/spec.md delta per capability this
+      change touches (refine stage, gated at gate 1 alongside proposal.md).
+
+      - New capability: use its exact kebab-case name (spec-lifecycle.md
+        §6.4). Existing capability: use its existing folder name under
+        openspec/specs/.
+      - Delta sections (## headers): ADDED / MODIFIED / REMOVED / RENAMED
+        Requirements — at least one is required.
+      - Each requirement: `### Requirement: <name>` with SHALL/MUST body
+        text and at least one `#### Scenario: <name>` (GIVEN/WHEN/THEN).
+      - NFR routing (spec-lifecycle.md §4.1): a measurable,
+        behavior-observable NFR is an ordinary requirement HERE, not a
+        separate document. A cross-cutting/project-wide invariant belongs
+        in a constitution ADR instead; an internal-quality concern with no
+        observable behavior belongs in design.md's NFR-discharge section
+        instead.
+
+      `lifecycle validate --stage refine` parses every specs/**/spec.md
+      with the same delta grammar the fold uses (internal/spec) — a
+      malformed delta is caught here, before design or plan ever start.
+    requires:
+      - proposal
+
+  - id: design
+    generates: design.md
+    description: >-
+      Technical design with an explicit NFR-discharge section and any ADR
+      proposals (spec-lifecycle.md §4, §7).
+    template: design.md
+    instruction: |
+      Create design.md — gated at gate 2, alongside the constitution
+      plan-gate (spec-lifecycle.md §3.3, §7).
+
+      Sections: Context, Goals/Non-Goals, Decisions (with alternatives
+      considered), **NFR Discharge** (how every NFR declared in this
+      change's specs/ delta that belongs here — spec-lifecycle.md §4.1 — is
+      met; every declared NFR must be accounted for somewhere), ADR
+      proposals (list any adr-proposals/*.md files in this change folder —
+      each is approved individually at gate 2, never bundled into blanket
+      design approval), Risks/Trade-offs.
+
+      Skip this artifact entirely only when refine proposed — and gate 1
+      approved — a design-skip (spec-lifecycle.md §3.2); the plan-gate
+      still runs at gate 3 regardless.
+
+      `lifecycle validate --stage design` checks the NFR-discharge section
+      is present; it does not grade the design's technical content.
+    requires:
+      - specs
+
+  - id: tasks
+    generates: tasks.md
+    description: >-
+      Milestones with pre-committed validation contracts, not unstructured
+      checkboxes (spec-lifecycle.md §4.2 — the one place this schema's
+      content diverges from stock OpenSpec's tasks.md).
+    template: tasks.md
+    instruction: |
+      Create tasks.md — gated at gate 3, alongside the constitution
+      plan-gate re-run against the (possibly design-gate-amended)
+      constitution (spec-lifecycle.md §3.3, §7).
+
+      Per milestone, in this fixed shape (spec-lifecycle.md §4.2, verbatim):
+
+        ## Milestone <n>: <name>
+        **Goal** — one sentence.
+        **Deliverables** — files/components/behaviors produced.
+        **Validation contract** — checkable acceptance criteria,
+          pre-committed: commands/tests to run and their expected
+          outcomes; which spec scenarios this milestone makes pass.
+        **Steps** — ordered breakdown, sized per `planGranularity`
+          (lifecycle.yml).
+
+      Planning owns the contract; execution consumes it — the verifier
+      grades against what was pre-committed here, never a moving target.
+
+      `lifecycle validate --stage plan` enforces every milestone carries
+      all four labels and that Validation contract has at least one
+      checkable line — enforceable because internal/spec's parser is ours,
+      unlike stock OpenSpec's unstructured checkbox tasks.md, which
+      `openspec validate` never checked this deeply.
+    requires:
+      - design
+
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  instruction: |
+    Read the approved proposal/specs/design/tasks, work through tasks.md's
+    milestones in order, and grade each one against its own pre-committed
+    Validation contract (never a moving target). Pause if you hit a
+    blocker or need clarification. Execution is out of this primitive's
+    scope (spec-lifecycle.md §3.1) — this instruction documents the format
+    contract only.

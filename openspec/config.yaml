@@ -1,0 +1,2 @@
+schema: kentra-spec-lifecycle
+context: This project's constitution lives at constitution/constitution.md (the adr-sourced-constitution companion primitive). lifecycle's own stage skills read it directly at gates 2 and 3 (design, plan) — this field exists for OpenSpec-format compatibility and human documentation only; no `lifecycle` code path reads it back (spec-lifecycle.md §7.1).
