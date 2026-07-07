@@ -1,38 +1,42 @@
 # execute-change.yaml -- reads a spec-lifecycle plan and sequences its
-# milestones through the milestone.yaml ladder (M5 sec 4 sketch).
+# milestones through the milestone.yaml ladder (M5 sec 4 sketch), now
+# structurally FLATTENED (M7) so per-attempt crash-safety survives across
+# the whole change, not just within one milestone.
 #
-# read_plan -> milestone_runs (for_each, max_concurrent: 1 -> sequential,
-#              S1 spike) -> milestone.yaml per item -> finish
+# read_plan -> cursor (root-level index counter, checkpoint-durable) ->
+#              milestone_step (nested milestone.yaml call, one per
+#              iteration) -> back to cursor -> ... -> finish
 #
-# IMPORTANT crash-safety caveat (verified against the fork's own source,
-# see workflows/README.md "Why milestone.yaml is not nested" for the full
-# citation): Conductor only takes periodic (`every_agent`) checkpoints at
-# the ROOT engine (`_subworkflow_depth == 0`); a `type: workflow` step's
-# child run is executed as one atomic unit from the parent's perspective
-# and is "re-run from scratch on resume" (the fork's own docstring, verbatim)
-# if the process dies mid-child. Worse still: the ENTIRE `for_each` group is
-# a single root step whose only checkpoint is taken *before* the group starts
-# (item outputs commit to context only after the whole group finishes), so a
-# crash mid-change re-runs the for_each from milestone 1 on `conductor resume`
-# -- ALREADY-COMPLETED MILESTONES RE-EXECUTE, not just the in-flight one.
-# (Empirically confirmed by the M5 verifier: a kill mid-M2 of a 3-milestone
-# run resumed with for_each item_keys ['0','0','1','2'] -- item 0 completed
-# twice -- and 5 implementer starts for 3 milestones.) No single milestone
-# *run* ever exceeds 3 attempts (each restart gets a fresh child budget and
-# the human gate is never skipped), so the ladder invariant itself holds;
-# the cost is wasted re-work + idempotency exposure (re-merges / re-run L1
-# side effects) once the live tier lands. This is a materially weaker
-# crash-safety unit than a milestone.yaml run standalone (which is fully
-# crash-safe attempt-by-attempt, proven by the M5 kill/resume test) --
-# flagged here and in the M5 report rather than silently assumed away. A
-# fix (route-chaining the ladder directly into this file's root, forgoing
-# `type: workflow` nesting) is available but out of scope for M5; M7/M8
-# should revisit if per-attempt crash-safety across a whole change is required.
+# Why this replaced the `for_each` structure (M7 flatten -- see
+# workflows/README.md "Why milestone.yaml is not (only) run nested" for the
+# full empirical finding this fixes, and tests/test_workflows_flatten.py for
+# the before/after proof): Conductor only takes periodic (`every_agent`)
+# checkpoints at the ROOT engine (`_subworkflow_depth == 0`); the OLD
+# `for_each` group was itself a single root step whose per-item outputs only
+# committed to context once the WHOLE group finished -- so a crash mid-change
+# resumed the for_each from milestone 1, re-executing already-completed
+# milestones (empirically confirmed by the M5 verifier: item_keys
+# ['0','0','1','2'] after a mid-M2 kill). The FIX: the milestone-index
+# *cursor* is now its own root-level `set` step (`cursor`), so its checkpoint
+# -- taken at the top of the root loop, before the next step runs -- always
+# reflects "how many milestones are already done", and `conductor resume`
+# restores `current_agent_name` to whichever root step was about to run
+# (either `cursor` or `milestone_step`) with every prior milestone's output
+# already committed to context. Completed milestones are NEVER re-executed
+# on resume; only the in-flight milestone's OWN ladder may restart from
+# attempt 1 (ACCEPTABLE -- see milestone.yaml/README, this was already true
+# and never violates the 3-attempt invariant since each restart is a fresh
+# child run that recounts from zero).
 #
-# read_plan's source: in production this is `lifecycle apply <change>
-# --format json` (spec-lifecycle sec 5.5); for M5 (and the hermetic tier
-# generally) a fixture JSON file with a `milestones` array is read directly
-# -- see tests/fixtures/execute_change_*.json.
+# read_plan's source: in production this would be a real spec-lifecycle
+# machine-readable plan surface; spec-lifecycle ships no such command today
+# (verified 2026-07-07 against the shipped v0.1.0 CLI -- `init`, `validate`,
+# `approve`, `status`, `archive`, `guard`; no `apply`) -- see
+# orchestration/resume/README.md's "spec-lifecycle reality check" for the
+# full deviation note. So, as in M5, a fixture JSON file with a `milestones`
+# array stands in -- see tests/fixtures/execute_change_*.json and
+# orchestration/resume/replan.py (M7) for how a *changed* plan's remaining
+# milestones get re-derived into a fresh fixture file.
 #
 # Stub tier (hermetic):
 #   CONDUCTOR_STUB_SCRIPT=path/to/script.json \
@@ -42,13 +46,13 @@
 workflow:
   name: execute-change
   description: Sequences a spec-lifecycle change's milestones through the ladder.
-  version: "1.0.0"
+  version: "2.0.0" # M7: flattened cursor loop (was a nested for_each in M5's 1.0.0)
   entry_point: read_plan
 
   runtime:
     provider: claudebox
     checkpoint:
-      every_agent: true # P4/ADR-0002 -- see the crash-safety caveat above re: nested milestones
+      every_agent: true # P4/ADR-0002 -- now change-wide crash-safe (M7 flatten), not just per-milestone
 
   input:
     plan_fixture_path:
@@ -56,8 +60,9 @@ workflow:
       required: true
       description: >-
         Path to a fixture JSON file with a `milestones` array (each item:
-        milestone_id, milestone_summary). Stands in for the real
-        `lifecycle apply --format json` surface (spec-lifecycle sec 5.5, M3).
+        milestone_id, milestone_summary). Stands in for a real machine-
+        readable plan surface (spec-lifecycle ships none today -- see the
+        header note above).
     attempt_threshold:
       type: number
       required: false
@@ -75,16 +80,56 @@ workflow:
     # computed per P4: milestones * 4 + overhead. Sized generously for the
     # 10-milestone max_iterations DoD test; individual milestone ladders
     # have their own (separate) budget inside their own sub-workflow run.
+    # The flatten adds ~2 root iterations per milestone (cursor + the
+    # milestone_step call itself) -- still comfortably inside 60 for 10.
     max_iterations: 60
 
 agents:
   - name: read_plan
     type: script
-    description: Emits the change's milestones (fixture JSON in M5's hermetic tier).
+    description: Emits the change's milestones (fixture JSON in the hermetic tier).
     command: cat
     args: ["{{ workflow.input.plan_fixture_path }}"]
     routes:
-      - to: milestone_runs
+      - to: cursor
+
+  - name: cursor
+    type: set
+    description: >-
+      ROOT-level milestone-index counter (M7 flatten) -- THE fix for
+      change-wide crash safety. Because this `set` step lives at root
+      workflow depth (never nested inside a `type: workflow` child), its
+      periodic checkpoint (taken at the top of the root loop, before the
+      next step executes) always reflects exactly how many milestones are
+      already committed to context. `conductor resume` restores
+      `current_agent_name` to this step or to `milestone_step` with every
+      completed milestone's output intact -- none of them re-run. See
+      workflows/README.md for the full before/after finding.
+    values:
+      index: "{{ (cursor.output.index if cursor is defined else -1) + 1 }}"
+    routes:
+      - to: milestone_step
+        when: "{{ output.index < (read_plan.output.milestones | length) }}"
+      - to: finish
+
+  - name: milestone_step
+    type: workflow
+    description: >-
+      Runs ONE milestone's full 3-attempt ladder (milestone.yaml, unchanged
+      from M5 -- kept nested purely for template reuse, not for its
+      checkpoint behavior). Re-invoked once per loop iteration with the
+      SAME step name (loop-back routing over a named step is the same
+      pattern milestone.yaml's own ladder already uses for
+      implementer/orchestrator).
+    workflow: milestone.yaml
+    input_mapping:
+      milestone_id: "{{ read_plan.output.milestones[cursor.output.index].milestone_id }}"
+      milestone_summary: "{{ read_plan.output.milestones[cursor.output.index].milestone_summary }}"
+      attempt_threshold: "{{ workflow.input.attempt_threshold }}"
+      gates_l1_command: "{{ workflow.input.gates_l1_command }}"
+      notify_dry_run: "{{ workflow.input.notify_dry_run }}"
+    routes:
+      - to: cursor
 
   - name: finish
     type: set
@@ -93,27 +138,6 @@ agents:
     routes:
       - to: "$end"
 
-for_each:
-  - name: milestone_runs
-    type: for_each
-    description: Run every milestone's ladder, in order (S1 spike -- max_concurrent 1).
-    source: read_plan.output.milestones
-    as: milestone
-    max_concurrent: 1 # sequential -- S1: confirmed to preserve list order at the pin (see report)
-    failure_mode: fail_fast
-    agent:
-      name: milestone_runner
-      type: workflow
-      workflow: milestone.yaml
-      input_mapping:
-        milestone_id: "{{ milestone.milestone_id }}"
-        milestone_summary: "{{ milestone.milestone_summary }}"
-        attempt_threshold: "{{ workflow.input.attempt_threshold }}"
-        gates_l1_command: "{{ workflow.input.gates_l1_command }}"
-        notify_dry_run: "{{ workflow.input.notify_dry_run }}"
-    routes:
-      - to: finish
-
 output:
-  milestones_processed: "{{ milestone_runs.outputs | length }}"
+  milestones_processed: "{{ cursor.output.index }}"
   status: "{{ finish.output }}"

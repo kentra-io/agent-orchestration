@@ -7,6 +7,11 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     "conductor-cli",
+    # Direct dependency (M7): orchestration/mcp/server.py imports
+    # `mcp.server.fastmcp` directly for the Conductor-MCP operator surface.
+    # Already present transitively via conductor-cli's own deps -- pinned
+    # explicitly here since we import it ourselves, not just inherit it.
+    "mcp>=1.28.0",
 ]
 
 [tool.uv.sources]
