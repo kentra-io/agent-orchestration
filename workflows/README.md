@@ -74,15 +74,22 @@ as ONE atomic step from the parent's point of view — so a crash mid-child
 is, on `conductor resume`, "re-run from scratch" (the fork's own docstring,
 verbatim above).
 
-**Consequence for `execute-change.yaml`:** a crash mid-milestone restarts
-*that one milestone's* ladder from attempt 1 — already-completed milestones
-are unaffected (the `for_each` item boundary is a root-level step boundary
-and IS checkpointed). This is a real, weaker crash-safety unit than
-`milestone.yaml` run standalone (which is crash-safe attempt-by-attempt).
+**Consequence for `execute-change.yaml`:** the entire `for_each` group is a
+single root step whose only checkpoint is taken *before* the group begins
+(item outputs commit to context only once the whole group finishes), so a
+crash mid-change re-runs the for_each from milestone 1 on `conductor resume`
+— **already-completed milestones re-execute**, not just the in-flight one.
+(Empirically confirmed by the M5 verifier: a kill mid-M2 of a 3-milestone run
+resumed with for_each `item_keys ['0','0','1','2']` — item 0 completed twice
+— and 5 implementer starts for 3 milestones.) The **ladder invariant still
+holds**: no single milestone *run* exceeds 3 attempts (each restart gets a
+fresh child budget, the human gate is never skipped, escalation still fires
+at exactly the 3rd failure), so no attempt is ever lost or double-counted.
+The cost is wasted re-work + idempotency exposure (re-merges / re-run L1 side
+effects) once the live tier lands. This is a real, weaker crash-safety unit
+than `milestone.yaml` run standalone (which is crash-safe attempt-by-attempt).
 It is shipped this way anyway for M5 (matches the plan's §4 template sketch,
-and per-milestone atomicity is arguably an acceptable crash-safety grain —
-some redundant agent calls, never a lost or double-counted attempt across
-the *whole change*). A stricter fix (route-chaining the ladder directly into
+and hermetically there are no live side effects yet). A stricter fix (route-chaining the ladder directly into
 `execute-change.yaml`'s root, forgoing `type: workflow` nesting entirely) is
 available but out of scope for M5 — flagged here for M7/M8 to revisit if
 change-wide per-attempt crash-safety is required.

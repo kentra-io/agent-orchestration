@@ -10,12 +10,20 @@
 # the ROOT engine (`_subworkflow_depth == 0`); a `type: workflow` step's
 # child run is executed as one atomic unit from the parent's perspective
 # and is "re-run from scratch on resume" (the fork's own docstring, verbatim)
-# if the process dies mid-child. That means: a crash mid-milestone HERE
-# restarts that one milestone's ladder from attempt 1 on `conductor resume`
-# -- already-completed milestones are unaffected (the for_each item boundary
-# IS a root-level step boundary, and IS checkpointed). This is a materially
-# weaker crash-safety unit than milestone.yaml run standalone (which is
-# fully crash-safe attempt-by-attempt, proven by the M5 kill/resume test) --
+# if the process dies mid-child. Worse still: the ENTIRE `for_each` group is
+# a single root step whose only checkpoint is taken *before* the group starts
+# (item outputs commit to context only after the whole group finishes), so a
+# crash mid-change re-runs the for_each from milestone 1 on `conductor resume`
+# -- ALREADY-COMPLETED MILESTONES RE-EXECUTE, not just the in-flight one.
+# (Empirically confirmed by the M5 verifier: a kill mid-M2 of a 3-milestone
+# run resumed with for_each item_keys ['0','0','1','2'] -- item 0 completed
+# twice -- and 5 implementer starts for 3 milestones.) No single milestone
+# *run* ever exceeds 3 attempts (each restart gets a fresh child budget and
+# the human gate is never skipped), so the ladder invariant itself holds;
+# the cost is wasted re-work + idempotency exposure (re-merges / re-run L1
+# side effects) once the live tier lands. This is a materially weaker
+# crash-safety unit than a milestone.yaml run standalone (which is fully
+# crash-safe attempt-by-attempt, proven by the M5 kill/resume test) --
 # flagged here and in the M5 report rather than silently assumed away. A
 # fix (route-chaining the ladder directly into this file's root, forgoing
 # `type: workflow` nesting) is available but out of scope for M5; M7/M8
