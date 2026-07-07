@@ -524,9 +524,7 @@ class TestMaxIterationsHeadroom:
         workflow's `limits.max_iterations: 60` must comfortably cover it
         (P4: "computed from the plan... generously oversized").
         """
-        milestones = [
-            {"milestone_id": f"M{i}", "milestone_summary": f"milestone {i}"} for i in range(1, 11)
-        ]
+        milestones = [{"id": i, "title": f"milestone {i}"} for i in range(1, 11)]
         plan_path = tmp_path / "plan.json"
         plan_path.write_text(json.dumps({"milestones": milestones}), encoding="utf-8")
 

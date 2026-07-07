@@ -30,28 +30,32 @@ Conductor workflow templates for the execution loop.
   `tempfile.gettempdir()`, which honors `TMPDIR` on POSIX. No fork patch
   needed; every shipped workflow/launcher should set this (P4/ADR-0002).
 
-- `execute-change.yaml` — the per-change template: reads the plan, `for_each`
-  milestone, change-level finish (M5).
+- `execute-change.yaml` — the per-change template: reads the plan, then a
+  **flat, root-level milestone-index cursor loop** (M5's original `for_each`
+  structure was replaced in **M7** — see the next section) → `milestone.yaml`
+  per milestone → change-level finish.
 - `milestone.yaml` — the 3-attempt escalation ladder for ONE milestone:
   implementer → gates → verifier → counter → orchestrator/escalate (M5).
   **Directly runnable as its own root workflow** (not just as
-  `execute-change.yaml`'s sub-workflow) — see the next section for why that
-  matters.
+  `execute-change.yaml`'s nested call) — see the next section for why that
+  matters. Unchanged since M5 — the M7 fix lives entirely in
+  `execute-change.yaml`'s outer structure.
 
 Both land in **M5** (`The ladder — execute-change + milestone templates`),
 wired against the StubProvider first (hermetic — `tests/test_workflows_
-ladder.py`), then the live cast in M6.
+ladder.py`), then the live cast in M6. `execute-change.yaml`'s outer loop was
+restructured in **M7** (`tests/test_workflows_flatten.py`) to fix the
+crash-safety gap the M5 verifier had flagged (below).
 
-### Why `milestone.yaml` is not (only) run nested — a load-bearing checkpoint-depth finding
+### Why `execute-change.yaml`'s milestone loop is a flat, root-level cursor (M7 fix) — a load-bearing checkpoint-depth finding
 
 P4/ADR-0002 requires the ladder's attempt counter to be crash-safe: a
-`kill -9` mid-attempt must not lose the recorded failure count. This is
-**verified true when `milestone.yaml` runs as the root workflow** (proven by
-`tests/test_workflows_ladder.py::TestKillResume`) — but it is **NOT** true
-when `milestone.yaml` runs *nested*, invoked via a `type: workflow` step
-(e.g. from `execute-change.yaml`'s `for_each`). Verified directly against
-the fork's own source at the pin (`kentra-io/conductor` @ `5461008`,
-`src/conductor/engine/workflow.py`):
+`kill -9` mid-attempt must not lose the recorded failure count, and — the
+change-wide extension of that same requirement — a crash mid-change must
+never re-execute an already-completed milestone. `milestone.yaml`'s own
+attempt counter is crash-safe **when it runs as the root workflow** (proven
+by `tests/test_workflows_ladder.py::TestKillResume`), because Conductor only
+takes periodic (`every_agent`) checkpoints at the ROOT engine:
 
 ```python
 @property
@@ -65,34 +69,63 @@ def _periodic_checkpoints_active(self) -> bool:
     return self._subworkflow_depth == 0 and self.config.workflow.runtime.checkpoint.is_enabled
 ```
 
+(Verified against the fork's source, `src/conductor/engine/workflow.py`.)
 `every_agent`/`every_seconds` checkpointing is gated on
 `_subworkflow_depth == 0` — a child `WorkflowEngine` created for a `type:
-workflow` step (`_execute_subworkflow`/`_execute_subworkflow_with_inputs`)
-never takes one, **regardless of its own `runtime.checkpoint` config**. And
-`_execute_subworkflow` runs the entire child via `await child_engine.run(...)`
-as ONE atomic step from the parent's point of view — so a crash mid-child
-is, on `conductor resume`, "re-run from scratch" (the fork's own docstring,
-verbatim above).
+workflow` step never takes one, **regardless of its own `runtime.checkpoint`
+config**, and `_execute_subworkflow` runs the entire child via `await
+child_engine.run(...)` as ONE atomic step from the parent's point of view —
+a crash mid-child is, on `conductor resume`, "re-run from scratch" (the
+fork's own docstring, verbatim above).
 
-**Consequence for `execute-change.yaml`:** the entire `for_each` group is a
-single root step whose only checkpoint is taken *before* the group begins
-(item outputs commit to context only once the whole group finishes), so a
-crash mid-change re-runs the for_each from milestone 1 on `conductor resume`
-— **already-completed milestones re-execute**, not just the in-flight one.
-(Empirically confirmed by the M5 verifier: a kill mid-M2 of a 3-milestone run
-resumed with for_each `item_keys ['0','0','1','2']` — item 0 completed twice
-— and 5 implementer starts for 3 milestones.) The **ladder invariant still
-holds**: no single milestone *run* exceeds 3 attempts (each restart gets a
-fresh child budget, the human gate is never skipped, escalation still fires
-at exactly the 3rd failure), so no attempt is ever lost or double-counted.
-The cost is wasted re-work + idempotency exposure (re-merges / re-run L1 side
-effects) once the live tier lands. This is a real, weaker crash-safety unit
-than `milestone.yaml` run standalone (which is crash-safe attempt-by-attempt).
-It is shipped this way anyway for M5 (matches the plan's §4 template sketch,
-and hermetically there are no live side effects yet). A stricter fix (route-chaining the ladder directly into
-`execute-change.yaml`'s root, forgoing `type: workflow` nesting entirely) is
-available but out of scope for M5 — flagged here for M7/M8 to revisit if
-change-wide per-attempt crash-safety is required.
+**M5's ORIGINAL `execute-change.yaml` got this wrong at the change level.**
+It sequenced milestones via a `for_each` group over `milestone.yaml` — but
+the entire `for_each` group is itself a *single root step*, whose only
+checkpoint is taken *before* the group begins (item outputs commit to
+context only once the whole group finishes). A crash mid-change therefore
+re-ran the `for_each` from milestone 1 on `conductor resume` —
+**already-completed milestones re-executed**, not just the in-flight one.
+Empirically confirmed twice: by the original M5 verifier (a kill mid-M2 of a
+3-milestone run resumed with `for_each` `item_keys ['0','0','1','2']` — item
+0 completed twice — and 5 implementer starts for 3 milestones), and
+reproduced fresh during the M7 spike with the identical result (see the M7
+PR body for that trace). The ladder invariant itself still held (no single
+milestone *run* ever exceeded 3 attempts), but this was a materially weaker
+crash-safety unit than `milestone.yaml` run standalone, and incompatible
+with `orchestration.md` §7.2's "resumes from the failed milestone" —
+escalation-resolve (M7) needs the RIGHT milestone to be exactly where a
+resume lands, not milestone 1 replayed first.
+
+**The M7 fix: flatten the milestone-index cursor to root depth.**
+`execute-change.yaml` no longer has a `for_each:` section at all. Instead:
+
+```
+read_plan → cursor (root-level `set` step, index += 1) →
+  ├─ milestone_step (nested `type: workflow` call to milestone.yaml,
+  │  for milestones[cursor.output.index]) → loops back to cursor
+  └─ finish (when cursor.output.index has reached the milestone count)
+```
+
+The milestone-index **`cursor`** is its own named, root-level `set` step —
+not baked into a `for_each` group's internal bookkeeping — so its periodic
+checkpoint (taken at the top of the root loop, before the next step
+executes) always reflects exactly how many milestones are already committed
+to context. `conductor resume` restores `current_agent_name` to whichever
+root step was about to run (`cursor` or `milestone_step`) with every prior
+milestone's output intact. **Proven** by
+`tests/test_workflows_flatten.py::TestFlattenKillResume` (a real `kill -9`
+mid-milestone-2 of a 3-milestone plan, then `conductor resume`): milestone 1
+is never re-touched — `read_plan` and milestone 1's own `cursor` transition
+appear exactly once, only in the pre-kill event log.
+
+`milestone_step`'s own ladder (inside the nested `milestone.yaml` call) MAY
+still restart from attempt 1 if the crash happens mid-ladder — that
+per-milestone cost is unchanged from M5 and remains **ACCEPTABLE** (a fresh
+child run always recounts from zero, so the 3-attempt invariant is never
+violated); only the ACROSS-milestone re-execution is what this flatten
+fixes. See `orchestration/resume/README.md` for how the M7 escalation-resolve
+poll-seam (`orchestration/resume/`) builds on this same checkpoint shape to
+detect a resolved escalation and resume from the correct milestone.
 
 ### ADR-0002 reconciliation — checkpoint-dir relocation is launcher-owned, not template-owned
 
