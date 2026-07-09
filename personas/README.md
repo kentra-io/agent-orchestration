@@ -24,14 +24,14 @@ shipping.
 The `ClaudeboxProvider` invokes, per ladder step:
 
 ```
-cb exec <box> claude -p "<task context>" --agent <role> \
+cb exec --workdir <worktree> <box> claude -p "<task context>" --agent <role> \
   --model <model> --permission-mode bypassPermissions \
   --output-format stream-json --verbose
 ```
 
 `--agent <role>` makes the persona the **primary driver** of the headless run:
-its system prompt replaces the default and its `tools` / `disallowedTools`
-restrictions apply. The workflow's inline `prompt:` is the *per-invocation task
+its system prompt replaces the default and its frontmatter (model, effort)
+applies. The workflow's inline `prompt:` is the *per-invocation task
 context* (milestone id, summary, prior guidance, the diff to judge); the persona
 is the *durable contract*.
 
