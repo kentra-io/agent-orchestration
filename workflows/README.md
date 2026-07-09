@@ -33,7 +33,7 @@ Conductor workflow templates for the execution loop.
 - `execute-change.yaml` — the per-change template: reads the plan, then a
   **flat, root-level milestone-index cursor loop** (M5's original `for_each`
   structure was replaced in **M7** — see the next section) → `milestone.yaml`
-  per milestone → change-level finish.
+  per milestone → the **M8 change-level finish** (below).
 - `milestone.yaml` — the 3-attempt escalation ladder for ONE milestone:
   implementer → gates → verifier → counter → orchestrator/escalate (M5).
   **Directly runnable as its own root workflow** (not just as
@@ -167,3 +167,63 @@ proves what IS true hermetically and is the actual structural guarantee P5
 needs: a provider error aborts the step before `counter` ever runs (`counter`
 only executes on the gates/verifier FAIL route). The retry loop itself is
 real-provider-only and gets its first live exercise at M6.
+
+### M8: change-level finish (`full_healthcheck` → `archive_handoff`) + the launcher
+
+Once `cursor` has run every milestone (`full_healthcheck` is the successor
+step to the old M5/M7 `finish` placeholder), `execute-change.yaml` runs a
+two-leg finish instead of just reporting a static string:
+
+1. **`full_healthcheck`** (`orchestration.harness.l2_healthcheck`, the same
+   L2 checker `milestone.yaml`'s `gates` step composes) — the change-wide
+   regression guard, run ONCE, routed on its EXIT CODE. A non-zero exit
+   routes to `healthcheck_failed` (a terminal `set` step) — no archive is
+   ever attempted against a broken build/suite.
+2. **`archive_handoff`** (`orchestration.launch.archive_handoff`) — the
+   `spec-lifecycle` change-archival hand-off, honoring the M3
+   tasks-completion gate. **Never passes a force/override flag** — the
+   tasks gate must be able to refuse. `archive_dry_run` (new workflow
+   input, hermetic default `true`) skips the real CLI call and reports
+   what WOULD run; flip to `false` only from a real launch context with
+   the archival CLI on `PATH` and an `openspec/` tree at the worktree cwd.
+   Exit-code contract: 0 archived, 1 refused (the gate's reason surfaces in
+   `output.reason`, never a crash — see `TestTasksGateRefuses` in
+   `tests/test_m8_archive_gate.py`), 2 error.
+
+`output.status` is one of `healthcheck_failed | dry_run | archived |
+refused | error` — the union of `healthcheck_failed`'s terminal marker and
+`archive_handoff`'s own `status` field. This replaced M5/M7's
+`"all_milestones_complete"` placeholder, which conflated "the milestone
+loop finished" (still available as `output.milestones_processed`) with
+"what the finish leg itself did" — `tests/test_workflows_flatten.py` and
+`tests/test_resume_watcher_integration.py` were updated for the new value
+(both leave the two new inputs at their hermetic defaults, so they observe
+`status: dry_run`).
+
+**Consent-invariant note** (`tests/test_consent_invariant.py`, M7): that
+test scans every shipped step's `description`/`prompt`/`command`/`args`/
+`stdin` text for consent-verb substrings (`lifecycle approve`, `lifecycle
+archive`, …) — including `type: script` steps, not just `type: agent`
+ones. `archive_handoff`'s own step `description` deliberately avoids
+spelling the archival CLI verb out (it points at
+`orchestration.launch.archive_handoff`'s docstring instead) so this
+genuinely-needed script step never trips that invariant; the actual
+`command`/`args` only ever name the Python module, never the CLI verb
+inline in the YAML.
+
+**The launcher** (`orchestration/launch/change.py`, `python -m
+orchestration.launch.change`) is what actually drives one change through
+this whole template end to end (M8, P10 process-per-change): `git worktree
+add` → materialize `.agent-claude` (`claude_dir_source`) + copy the cast
+personas into `<worktree>/.claude/agents/` + write
+`<worktree>/.claudebox/config.yaml` (skippable via `box.enabled: false` —
+what every hermetic test uses) → resolve the plan (`lifecycle apply`, or a
+`plan_fixture_path` override) → spawn `conductor run` as a **child
+process**, `TMPDIR` relocated to a persistent, worktree-scoped directory
+(P4) so two concurrent changes never share a checkpoint/event-log
+directory by construction. `wait: false` spawns and returns the pid
+immediately — the mechanism that makes N concurrent `launch()` calls
+genuinely concurrent rather than serialized. See the module's own docstring
+for the full input/output JSON shape, and `tests/test_m8_concurrency.py`
+for the concurrency DoD proof (two changes' worktrees, interleaved real git
+commits, zero cross-contamination, the shared repo's `main` untouched).

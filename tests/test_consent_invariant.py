@@ -68,27 +68,46 @@ _SCANNABLE_FIELDS = ("prompt", "description", "command", "args", "stdin", "tools
 _KNOWN_TOOL_SKILL_LIKE_FIELDS = {"tools"}
 
 
+def _is_llm_agent_step(step: AgentDef) -> bool:
+    """True for the steps the consent invariant is actually about.
+
+    §7.3's constraint is that no **Conductor-spawned LLM agent** (a Mode-B
+    surface: an `agent`-type step with a persona, a provider, and a tool
+    surface) may carry approval authority. Deterministic `script`/`set`/
+    `human_gate`/... steps run in the Conductor process the *launch context*
+    started — they have no LLM to self-approve with, and one of them
+    (`archive_handoff`, M8) legitimately shells the archive verb *as* the
+    launch context. Scanning those too made the invariant a substring taboo
+    rather than a boundary check (M8 review finding, 2026-07-09).
+    `AgentDef.type` defaults to None, which Conductor treats as `agent`.
+    """
+    return (step.type or "agent") == "agent"
+
+
 def _agent_step_definitions() -> list[tuple[Path, AgentDef]]:
-    """Every `agents:`-list step definition across every shipped workflow template.
+    """Every LLM `agent`-type step definition across every shipped workflow template.
 
     Loaded through Conductor's own `load_config` (the real, validated
     `AgentDef` pydantic model) rather than a raw YAML parse — this repo has
     no PyYAML dependency (Conductor itself uses `ruamel.yaml` internally),
     and going through the real schema is more robust anyway: it exercises
     the actual field set `AgentDef` validates, not whatever a hand-rolled
-    YAML walk happens to find.
+    YAML walk happens to find. Non-LLM step types (`script`/`set`/...) are
+    excluded — see `_is_llm_agent_step`.
     """
     steps: list[tuple[Path, AgentDef]] = []
     for workflow_path in sorted(WORKFLOWS_DIR.glob("*.yaml")):
         config = load_config(workflow_path)
         for step in config.agents:
-            steps.append((workflow_path, step))
+            if _is_llm_agent_step(step):
+                steps.append((workflow_path, step))
         for group in config.for_each:
-            steps.append((workflow_path, group.agent))
+            if _is_llm_agent_step(group.agent):
+                steps.append((workflow_path, group.agent))
         for group in config.parallel:
             for member_name in group.agents:
                 member = next((a for a in config.agents if a.name == member_name), None)
-                if member is not None:
+                if member is not None and _is_llm_agent_step(member):
                     steps.append((workflow_path, member))
     return steps
 
@@ -121,6 +140,22 @@ class TestNoConsentVerbInAnyWorkflowStep:
             "lifecycle approve/archive must only be reachable through the "
             "operator MCP's Mode-A surface (orchestration/mcp/), never a "
             "Conductor-spawned workflow step."
+        )
+
+    def test_archive_handoff_is_a_script_step_not_an_llm_agent(self) -> None:
+        """The one workflow step that DOES run the archive verb (M8's
+        `archive_handoff`) must be a deterministic `script` step — the launch
+        context's own hand-off — never an `agent`-type step. This is the
+        positive half of the §7.3 boundary: the verb is allowed exactly where
+        no LLM holds it.
+        """
+        config = load_config(WORKFLOWS_DIR / "execute-change.yaml")
+        step = next((a for a in config.agents if a.name == "archive_handoff"), None)
+        assert step is not None, "execute-change.yaml must ship an archive_handoff step"
+        assert step.type == "script", (
+            f"archive_handoff must be type=script (launch-context hand-off), got {step.type!r} -- "
+            "an agent-type step here would put lifecycle archive inside a Mode-B tool surface "
+            "(orchestration.md sec 7.3)"
         )
 
     def test_conductor_agentdef_schema_has_no_UNCOVERED_tools_or_skills_field(self) -> None:

@@ -151,7 +151,13 @@ class TestFlattenKillResume:
         assert resume.returncode == 0, f"stdout={resume.stdout!r} stderr={resume.stderr!r}"
         output = json.loads(resume.stdout)
         assert output["milestones_processed"] == 3
-        assert output["status"] == "all_milestones_complete"
+        # M8: the old "all_milestones_complete" placeholder was replaced by
+        # the real change-level finish leg (full healthcheck + archive
+        # hand-off) -- this run leaves both new inputs at their hermetic
+        # defaults (healthcheck_command="exit 0", archive_dry_run=true), so
+        # the healthcheck passes and archive_handoff reports "dry_run"
+        # (see workflows/execute-change.yaml's `output.status`).
+        assert output["status"] == "dry_run"
 
         all_events = _read_events(tmp_dir)
         all_started = _agent_names(all_events, "agent_started")

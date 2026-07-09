@@ -5,7 +5,9 @@
 #
 # read_plan -> cursor (root-level index counter, checkpoint-durable) ->
 #              milestone_step (nested milestone.yaml call, one per
-#              iteration) -> back to cursor -> ... -> finish
+#              iteration) -> back to cursor -> ... -> full_healthcheck ->
+#              archive_handoff (M8 change-level finish -- see the "finish"
+#              section below) | healthcheck_failed
 #
 # Why this replaced the `for_each` structure (M7 flatten -- see
 # workflows/README.md "Why milestone.yaml is not (only) run nested" for the
@@ -79,6 +81,35 @@ workflow:
       type: boolean
       required: false
       default: true
+    change_id:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The spec-lifecycle change id, passed to the `archive_handoff` step
+        (M8). Only required when `archive_dry_run` is false -- a hermetic
+        run leaves this at the trivial default (`archive_handoff` never
+        shells out to `lifecycle` while dry_run holds).
+    healthcheck_command:
+      type: string
+      required: false
+      default: "exit 0"
+      description: >-
+        M8 change-level finish, leg 1/2: the full L2 healthcheck command
+        (the change-wide regression guard, run ONCE after every milestone's
+        own ladder already passed) -- a real wiring templates the project's
+        actual suite/build/lint command(s) here; the trivial always-pass
+        default keeps a hermetic run's control-flow independent of a real
+        project existing at the worktree.
+    archive_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        M8 change-level finish, leg 2/2: skip the real `lifecycle archive`
+        call (hermetic default -- see `orchestration.launch.archive_handoff`).
+        Flip to false only from a real launch context with a real
+        `lifecycle` binary and an `openspec/` tree at the worktree cwd.
 
   limits:
     # computed per P4: milestones * 4 + overhead. Sized generously for the
@@ -114,7 +145,7 @@ agents:
     routes:
       - to: milestone_step
         when: "{{ output.index < (read_plan.output.milestones | length) }}"
-      - to: finish
+      - to: full_healthcheck
 
   - name: milestone_step
     type: workflow
@@ -140,13 +171,63 @@ agents:
     routes:
       - to: cursor
 
-  - name: finish
+  - name: full_healthcheck
+    type: script
+    description: >-
+      M8 change-level finish, leg 1/2: the full L2 healthcheck (the
+      change-wide regression guard) run ONCE, after every milestone's own
+      ladder has already passed -- `orchestration.harness.l2_healthcheck`,
+      routed on its EXIT CODE (0 good, 1 needs-attention, 2 harness error --
+      the same convention `milestone.yaml`'s `gates` step uses, not a
+      `pass` JSON field).
+    command: python3
+    args: ["-m", "orchestration.harness.l2_healthcheck"]
+    stdin: '{{ {"commands": [workflow.input.healthcheck_command]} | tojson }}'
+    routes:
+      - to: archive_handoff
+        when: "{{ full_healthcheck.output.exit_code == 0 }}"
+      - to: healthcheck_failed
+
+  - name: healthcheck_failed
     type: set
-    description: Change-level finish placeholder (full healthcheck + archive hand-off is M8's scope).
-    value: "all_milestones_complete"
+    description: >-
+      Terminal state: the change-level healthcheck failed, so no archive
+      was attempted -- a broken suite/build must never fold into the
+      living spec. See `output.status` below.
+    values:
+      status: healthcheck_failed
+    routes:
+      - to: "$end"
+
+  - name: archive_handoff
+    type: script
+    description: >-
+      M8 change-level finish, leg 2/2: shells `lifecycle archive
+      <change_id> --format json` (never any force flag), honoring the
+      tasks-completion gate (M3, `internal/archive/tasks_gate.go`). This
+      is a deterministic `script` step -- the LAUNCH CONTEXT's own
+      hand-off, not a Mode-B agent tool surface -- which is exactly the
+      sec-7.3 boundary: the verb is allowed here BECAUSE no LLM holds it
+      (`tests/test_consent_invariant.py` scans only agent-type steps and
+      positively asserts this step stays type=script). `archive_dry_run`
+      (hermetic default true) reports what WOULD run without touching
+      `openspec/`; flip to false only from a real launch context with
+      `lifecycle` on PATH and an `openspec/` tree at the worktree cwd.
+      Exit-code contract (`orchestration.launch.archive_handoff`):
+      0 archived, 1 refused (the gate's reason lands in `output.reason`,
+      never a crash), 2 error.
+    command: python3
+    args: ["-m", "orchestration.launch.archive_handoff"]
+    stdin: >-
+      {{ {"worktree": ".", "change_id": workflow.input.change_id,
+      "dry_run": workflow.input.archive_dry_run} | tojson }}
     routes:
       - to: "$end"
 
 output:
   milestones_processed: "{{ cursor.output.index }}"
-  status: "{{ finish.output }}"
+  status: >-
+    {{ 'healthcheck_failed' if healthcheck_failed is defined
+       else archive_handoff.output.status if archive_handoff is defined
+       else 'unknown' }}
+  archive_reason: "{{ archive_handoff.output.reason if archive_handoff is defined else none }}"
