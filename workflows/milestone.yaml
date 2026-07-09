@@ -96,8 +96,14 @@ workflow:
 
 agents:
   - name: implementer
+    # Persona: personas/implementer.md (materialized at
+    # <worktree>/.claude/agents/implementer.md). The provider passes
+    # `--agent implementer`, so the persona's MUST/HALT contract (spec sec 6.2)
+    # is the system prompt; this inline prompt supplies only per-invocation
+    # task context. `--model opus` overrides the frontmatter model; the
+    # persona's `effort: medium` (spec sec 6) rides the frontmatter.
     description: Does the milestone's work -- solo on attempt 1, guided by the Orchestrator on attempts 2-3.
-    model: sonnet # placeholder cast/model assignment -- M6 builds the real personas
+    model: opus # spec sec 6: Implementer = Opus, medium effort (effort in persona frontmatter)
     input:
       - workflow.input.milestone_id
       - workflow.input.milestone_summary
@@ -111,11 +117,17 @@ agents:
       {{ orchestrator.output.guidance }}
       {% endif %}
 
-      Do the work for this milestone only, then report a summary of your diff.
+      Read spec.md, tasks.md, and this milestone's validation contract, then do
+      the work for THIS milestone only, following your contract to the letter.
     output:
       diff_summary:
         type: string
-        description: Summary of what was changed for this milestone.
+        description: Summary of what was changed, each line tracing to a task + spec requirement.
+      halt:
+        type: string
+        description: >-
+          Any QUESTION (ambiguity) or DEVIATION that stopped work, or "none".
+          Captured for observability; halt-to-escalate routing is an M8 follow-up.
     retry:
       max_attempts: 3
       backoff: exponential
@@ -137,27 +149,43 @@ agents:
       - to: verifier
 
   - name: verifier
+    # Persona: personas/verifier.md (spec sec 6.3/5.2 -- fresh, evidence-or-
+    # zero, intent-vs-actual, anchored L3 rubric). Deliberately NOT given
+    # implementer.output content beyond the gates context: the persona treats
+    # any implementer claim as unverified; ground truth is the diff +
+    # spec/tasks/deviation.json it reads from the worktree itself.
     description: >-
       Fresh, author != verifier judgment (coverage matrix, L3, intent-vs-actual).
-      M5 stub cast; the real behavioral contract lands in M6.
-    model: sonnet
+    model: opus # spec sec 6: Verifier = Opus, HIGH effort (effort in persona frontmatter)
     input:
-      - implementer.output
       - gates.output
     prompt: |
       Milestone: {{ workflow.input.milestone_id }}
-      Implementer's diff summary: {{ implementer.output.diff_summary }}
-      Gates verdict (exit_code {{ gates.output.exit_code }}): {{ gates.output.report | tojson }}
+      {{ workflow.input.milestone_summary }}
 
-      Judge the milestone against its acceptance criteria. PASS only if
-      coverage is fully met, gates are green, and no undeclared deviation exists.
+      Deterministic gates verdict (exit_code {{ gates.output.exit_code }}):
+      {{ gates.output.report | tojson }}
+
+      Judge this milestone per your contract: read spec.md, tasks.md, the
+      validation contract, deviation.json, and the git diff of the work; build
+      the coverage matrix; run the intent-vs-actual diff; grade the L3
+      remainder against the anchored rubric.
     output:
       pass:
         type: boolean
-        description: PASS only if coverage is fully met, gates are green, and no undeclared deviation exists.
+        description: >-
+          Hard verdict. True ONLY if coverage fully MET, gates green, diff maps
+          entirely to plan+spec (no undeclared deviation, no false completion),
+          and every real deviation was declared.
+      score:
+        type: number
+        description: Anchored 0.0-1.0 L3 rubric score (advisory; never rescues a hard FAIL).
+      violations:
+        type: string
+        description: Each undeclared deviation / false completion / hidden deviation found, or "none".
       notes:
         type: string
-        description: Rationale, or what's missing.
+        description: Rationale; for a FAIL, exactly what is missing (consumed by the Orchestrator).
     retry:
       max_attempts: 3
       backoff: exponential
@@ -187,25 +215,36 @@ agents:
       - to: escalate
 
   - name: orchestrator
+    # Persona: personas/orchestrator.md (spec sec 6.1 -- stateless resolver;
+    # guidance-only; never decides escalation, that is `counter`'s routes).
     description: >-
       Stateless resolution step -- emits next-attempt guidance. Does NOT
       decide human-escalation (Conductor's counter/routes do that).
-    model: sonnet
+    model: opus # spec sec 6: Orchestrator = Opus, HIGH effort (effort in persona frontmatter)
     input:
       - verifier.output
       - implementer.output
       - counter.output
     prompt: |
       Milestone {{ workflow.input.milestone_id }} failed attempt {{ counter.output.attempts }}.
-      Verifier notes: {{ verifier.output.notes }}
-      Implementer's diff summary: {{ implementer.output.diff_summary }}
 
-      Emit guidance for the next attempt (re-scope, supply missing context,
-      tighten instructions, or re-order). Do not decide whether to escalate.
+      Verifier verdict: pass={{ verifier.output.pass }}, score={{ verifier.output.score }}
+      Violations: {{ verifier.output.violations }}
+      Verifier notes: {{ verifier.output.notes }}
+
+      Implementer's diff summary: {{ implementer.output.diff_summary }}
+      Implementer halt (QUESTION/DEVIATION or "none"): {{ implementer.output.halt }}
+
+      Diagnose why this attempt failed and emit next-attempt guidance per your
+      contract (re-scope, supply missing context, tighten, or re-order) -- or
+      flag the milestone infeasible as written. Do not decide whether to escalate.
     output:
       guidance:
         type: string
-        description: Next-attempt guidance for the Implementer.
+        description: Next-attempt guidance for the Implementer (injected verbatim into its next prompt).
+      infeasible:
+        type: boolean
+        description: True only if the milestone cannot pass as written (reason in guidance).
     retry:
       max_attempts: 3
       backoff: exponential

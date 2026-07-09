@@ -47,5 +47,6 @@ testpaths = ["tests"]
 # leftover/unmanaged counter file.
 norecursedirs = ["fixtures"]
 markers = [
-    "live: costs real money and needs a running claudebox box with claude authenticated inside it (see tests/test_workflows_live.py). Not run by default -- self-skips at zero cost unless M1B_LIVE_BOX/M1B_LIVE_WORKTREE are set.",
+    "live: costs real money and needs a running claudebox box with claude authenticated inside it (see tests/test_workflows_live.py and tests/test_m6_live_verification.py). Not run by default -- self-skips at zero cost unless the relevant env vars are set (M1B_LIVE_BOX/M1B_LIVE_WORKTREE for M1b, M6_LIVE_BOX/M6_LIVE_WORKTREE for M6).",
+    "m6_ladder: the M6 full-ladder live run (conductor run workflows/milestone.yaml against a real box) -- the most expensive single test; carried IN ADDITION to `live` so it can be selected/excluded separately (-m 'live and not m6_ladder').",
 ]

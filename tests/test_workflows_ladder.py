@@ -142,8 +142,17 @@ class TestPassAtAttempt:
         output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "did the work"}}],
-                "verifier": [{"content": {"pass": True, "notes": "looks good"}}],
+                "implementer": [{"content": {"diff_summary": "did the work", "halt": "none"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "looks good",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    }
+                ],
             },
             inputs={"milestone_id": "M1"},
         )
@@ -159,12 +168,28 @@ class TestPassAtAttempt:
         output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "attempt"}}],
+                "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
                 "verifier": [
-                    {"content": {"pass": False, "notes": "missing tests"}},
-                    {"content": {"pass": True, "notes": "now covered"}},
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "missing tests",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    },
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "now covered",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    },
                 ],
-                "orchestrator": [{"content": {"guidance": "add the missing tests"}}],
+                "orchestrator": [
+                    {"content": {"guidance": "add the missing tests", "infeasible": False}}
+                ],
             },
             inputs={"milestone_id": "M1"},
         )
@@ -180,15 +205,36 @@ class TestPassAtAttempt:
         output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "attempt"}}],
+                "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
                 "verifier": [
-                    {"content": {"pass": False, "notes": "fail 1"}},
-                    {"content": {"pass": False, "notes": "fail 2"}},
-                    {"content": {"pass": True, "notes": "pass"}},
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "fail 1",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    },
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "fail 2",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    },
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "pass",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    },
                 ],
                 "orchestrator": [
-                    {"content": {"guidance": "guidance 1"}},
-                    {"content": {"guidance": "guidance 2"}},
+                    {"content": {"guidance": "guidance 1", "infeasible": False}},
+                    {"content": {"guidance": "guidance 2", "infeasible": False}},
                 ],
             },
             inputs={"milestone_id": "M1"},
@@ -222,11 +268,20 @@ class TestEscalation:
         output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "attempt"}}],
+                "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
                 # Settles on "fail" forever once exhausted -- three real
                 # verifier calls all fail.
-                "verifier": [{"content": {"pass": False, "notes": "still failing"}}],
-                "orchestrator": [{"content": {"guidance": "try again"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "still failing",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    }
+                ],
+                "orchestrator": [{"content": {"guidance": "try again", "infeasible": False}}],
             },
             inputs={"milestone_id": "M1"},
         )
@@ -260,12 +315,28 @@ class TestGuidanceReachesNextAttempt:
         _output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "attempt"}}],
+                "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
                 "verifier": [
-                    {"content": {"pass": False, "notes": "fail"}},
-                    {"content": {"pass": True, "notes": "pass"}},
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "fail",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    },
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "pass",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    },
                 ],
-                "orchestrator": [{"content": {"guidance": "UNIQUE_GUIDANCE_MARKER"}}],
+                "orchestrator": [
+                    {"content": {"guidance": "UNIQUE_GUIDANCE_MARKER", "infeasible": False}}
+                ],
             },
             inputs={"milestone_id": "M1"},
         )
@@ -354,12 +425,26 @@ class TestKillResume:
         script_path = write_stub_script(
             tmp_path / "script",
             {
-                "implementer": [{"content": {"diff_summary": "attempt"}}],
+                "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
                 "verifier": [
-                    {"content": {"pass": False, "notes": "fail"}},
-                    {"content": {"pass": True, "notes": "pass"}},
+                    {
+                        "content": {
+                            "pass": False,
+                            "notes": "fail",
+                            "score": 0.2,
+                            "violations": "undeclared deviation: touched out-of-path file",
+                        }
+                    },
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "pass",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    },
                 ],
-                "orchestrator": [{"content": {"guidance": "keep going"}}],
+                "orchestrator": [{"content": {"guidance": "keep going", "infeasible": False}}],
             },
         )
         tmp_dir = tmp_path / "tmp"
@@ -531,8 +616,17 @@ class TestMaxIterationsHeadroom:
         output, events = _run_ladder(
             tmp_path,
             {
-                "implementer": [{"content": {"diff_summary": "did it"}}],
-                "verifier": [{"content": {"pass": True, "notes": "good"}}],
+                "implementer": [{"content": {"diff_summary": "did it", "halt": "none"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "good",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    }
+                ],
             },
             inputs={"plan_fixture_path": str(plan_path)},
             workflow=EXECUTE_CHANGE_WORKFLOW,
@@ -571,8 +665,17 @@ class TestForEachOrderingS1:
         script_path = write_stub_script(
             tmp_path / "script",
             {
-                "implementer": [{"content": {"diff_summary": "did it"}}],
-                "verifier": [{"content": {"pass": True, "notes": "good"}}],
+                "implementer": [{"content": {"diff_summary": "did it", "halt": "none"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "good",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    }
+                ],
             },
         )
         tmp_dir = tmp_path / "tmp"
