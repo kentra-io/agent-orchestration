@@ -124,7 +124,13 @@ class TestResumeInPlaceUnchangedPlan:
         assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
         output = _parse_output_json(result.stdout)
         assert output["milestones_processed"] == 2
-        assert output["status"] == "all_milestones_complete"
+        # M8: "all_milestones_complete" was the pre-M8 finish placeholder;
+        # the real change-level finish leg now reports the healthcheck/
+        # archive outcome instead -- this run leaves both new inputs at
+        # their hermetic defaults, so healthcheck passes and
+        # archive_handoff reports "dry_run" (see
+        # workflows/execute-change.yaml's `output.status`).
+        assert output["status"] == "dry_run"
 
         all_events = _read_events(tmp_dir)
         post_resume_events = all_events[len(pre_resume_events) :]
