@@ -77,9 +77,24 @@ class TestInspectEscalationQueue:
         assert result["stuck_milestone_id"] == 2
         assert result["completed_milestone_ids"] == [1]
         assert result["verifier_reports"] == [
-            {"pass": False, "notes": "m2 fail 1"},
-            {"pass": False, "notes": "m2 fail 2"},
-            {"pass": False, "notes": "m2 fail 3"},
+            {
+                "pass": False,
+                "notes": "m2 fail 1",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
+            {
+                "pass": False,
+                "notes": "m2 fail 2",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
+            {
+                "pass": False,
+                "notes": "m2 fail 3",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
         ]
 
     def test_no_checkpoint_at_all_returns_none(self, tmp_path: Path) -> None:

@@ -65,14 +65,42 @@ def _produce_escalated_and_crashed_run(tmp_path: Path) -> tuple[Path, Path, dict
     script_path = write_stub_script(
         tmp_path / "script",
         {
-            "implementer": [{"content": {"diff_summary": "attempt"}}],
+            "implementer": [{"content": {"diff_summary": "attempt", "halt": "none"}}],
             "verifier": [
-                {"content": {"pass": True, "notes": "m1 good"}},
-                {"content": {"pass": False, "notes": "m2 fail 1"}},
-                {"content": {"pass": False, "notes": "m2 fail 2"}},
-                {"content": {"pass": False, "notes": "m2 fail 3"}},
+                {
+                    "content": {
+                        "pass": True,
+                        "notes": "m1 good",
+                        "score": 1.0,
+                        "violations": "none",
+                    }
+                },
+                {
+                    "content": {
+                        "pass": False,
+                        "notes": "m2 fail 1",
+                        "score": 0.2,
+                        "violations": "undeclared deviation: touched out-of-path file",
+                    }
+                },
+                {
+                    "content": {
+                        "pass": False,
+                        "notes": "m2 fail 2",
+                        "score": 0.2,
+                        "violations": "undeclared deviation: touched out-of-path file",
+                    }
+                },
+                {
+                    "content": {
+                        "pass": False,
+                        "notes": "m2 fail 3",
+                        "score": 0.2,
+                        "violations": "undeclared deviation: touched out-of-path file",
+                    }
+                },
             ],
-            "orchestrator": [{"content": {"guidance": "try again"}}],
+            "orchestrator": [{"content": {"guidance": "try again", "infeasible": False}}],
         },
     )
     tmp_dir = tmp_path / "tmp"
@@ -148,10 +176,30 @@ class TestReadVerifierReports:
 
         reports = read_verifier_reports(event_logs[0])
         assert reports == [
-            {"pass": False, "notes": "m2 fail 1"},
-            {"pass": False, "notes": "m2 fail 2"},
-            {"pass": False, "notes": "m2 fail 3"},
+            {
+                "pass": False,
+                "notes": "m2 fail 1",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
+            {
+                "pass": False,
+                "notes": "m2 fail 2",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
+            {
+                "pass": False,
+                "notes": "m2 fail 3",
+                "score": 0.2,
+                "violations": "undeclared deviation: touched out-of-path file",
+            },
         ]
         # Milestone 1's PASSING verifier call is excluded -- only the calls
         # since `milestone_step` last started (i.e. milestone 2's) count.
-        assert {"pass": True, "notes": "m1 good"} not in reports
+        assert {
+            "pass": True,
+            "notes": "m1 good",
+            "score": 1.0,
+            "violations": "none",
+        } not in reports

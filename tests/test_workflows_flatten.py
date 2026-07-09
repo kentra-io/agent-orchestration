@@ -59,8 +59,17 @@ class TestFlattenKillResume:
         script_path = write_stub_script(
             tmp_path / "script",
             {
-                "implementer": [{"content": {"diff_summary": "did it"}}],
-                "verifier": [{"content": {"pass": True, "notes": "good"}}],
+                "implementer": [{"content": {"diff_summary": "did it", "halt": "none"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "good",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    }
+                ],
             },
         )
         tmp_dir = tmp_path / "tmp"

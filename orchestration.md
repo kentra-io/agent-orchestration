@@ -56,8 +56,8 @@
       verification harness · Conductor-MCP             the operator MCP
   ─────────────────────────────────────────────
   agent-definition   →  compiled personas         ← Implementer / Verifier / Orchestrator run via
-  claudebox          →  per-agent sandbox+overlay    ClaudeboxProvider (`claude -p --agent`), one
-  spec-lifecycle     →  the plan + gates + records   worktree per change, isolated skill/plugin overlay
+  claudebox          →  per-agent sandbox+`.claude`  ClaudeboxProvider (`claude -p --agent`), one
+  spec-lifecycle     →  the plan + gates + records   worktree per change, materialized `.claude` per agent
   adr-sourced-const. →  the governed HOW
 ```
 
@@ -151,12 +151,12 @@ This is what makes the Implementer's "follow the plan to the letter and flag dev
 
 - **Diff-confined-to-declared-paths.** The milestone's validation contract declares an **allowed path-set**; Conductor checks the diff's file list against it. Any out-of-path file is a **mechanical** deviation flag (no LLM) — the cheapest, highest-signal adherence gate we have (from Factory's "diff confined to agreed paths").
 - **Deviation log.** Declared deviations append to `spec-lifecycle`'s `deviation.json`; the Verifier cross-checks that every real deviation it finds was declared (§5.2).
-- **Tamper-proofing (from the sandbox spike, §16).** The Implementer runs with **no WebSearch/WebFetch tools** (removes the "google the answer / find the merged PR" channel for free, at the agent-def layer — §8); acceptance tests/spec/tasks are **read-only to the Implementer** via a `:ro` mount ridden on the claudebox overlay seam (§8). Network-egress control and git-history denial were **spiked and rejected** as not-cheap / not-relevant (§8, §16).
+- **Tamper-proofing (from the sandbox spike, §16; tool posture revised 2026-07-09, user-locked).** **Every cast agent runs the default Claude Code toolset — no per-role `tools:`/`disallowedTools` surgery** (judged unnecessary complexity). Discipline is *behavioral* (the persona contracts: web is never a source of requirements for the Implementer; the Verifier reports-does-not-fix; the Orchestrator is guidance-only) and *structural* (author ≠ verifier, deterministic gates, counter-owned escalation, human-cleared L3). Field research (2026-07-09) backs default-allow for the doing agent: web denial has documented capability cost (Codex re-shipped internet 3 weeks after a no-internet launch; OpenHands-Versa +9.1pp from browsing; Factory telemetry = web use dominated by docs/API refs). **Eval/benchmark runs MAY restrict the Implementer at materialization** (the Factory pattern: web in production, revoked for its own SWE-bench run) — a one-line persona-frontmatter edit, never a box-wide `settings.json` deny (settings-deny survives `bypassPermissions` and the roles share the box). Acceptance tests/spec/tasks are **read-only to the Implementer** via a `:ro` mount ridden on the claudebox `claude_dir_source` provisioning seam (§8). Network-egress control and git-history denial were **spiked and rejected** as not-cheap / not-relevant (§8, §16).
 
 ### 5.4 Judge hygiene (the L3 agent) and flakiness
 
 - **L3 verdict format:** one call → a `0.0–1.0` score **plus** a hard pass/fail, against an **anchored rubric** tied to the plan's acceptance criteria (Anthropic's most-consistent format).
-- **Read-only + grounded:** the judge gets Read/Grep and *may run the tests*, but no Write — it cannot alter what it grades, and grounding in real test output resists verbosity gaming.
+- **Read-only + grounded:** the judge *may run the tests* but changes nothing it grades — a behavioral contract rule (default toolset, per the 2026-07-09 tool posture — §5.3), backed structurally: the deterministic gates re-run independently and a human clears anything L3 touches. Grounding in real test output resists verbosity gaming.
 - **Advisory, never terminal:** its verdict never auto-merges; a human clears anything L3 touches. Prefer one anchored judge over multi-agent debate (debate amplifies bias). Calibrate against human spot-checks; recalibrate the rubric past ~20–25% divergence.
 - **L2 flakiness:** treat as first-class — a test under ~95% pass-rate over N reruns is **quarantined**, not silently retried; retry specific operations, not whole tests. "Green after retry" must not mask a deterministic failure.
 
@@ -191,10 +191,10 @@ Behavioral rules, baked into its agent-def `system_prompt` (sourced from the pla
 - **Ambiguity is a halt, not a guess.** If a task is under-specified or the spec is silent — STOP, emit a QUESTION, do not improvise.
 - **Deviation is a logged halt.** For any departure from spec/plan, append to `deviation.json` *before* proceeding (task id, spec §, what the plan said, what you did and why, blast radius, status `BLOCKED-AWAITING-APPROVAL`). An undeclared deviation is a defect.
 - **MUST NOT** edit `spec.md`/`tasks.md` content (only tick boxes), mark a task done without recorded evidence, expand scope beyond listed tasks, or touch files outside the declared path-set (§5.3).
-- Runs with **no web tools** (§8).
+- **Default toolset; web constrained in use, not in surface** (revised 2026-07-09 — §5.3): MAY consult the web for docs/API refs/dependency issues; the web is never a source of requirements (spec wins; a conflict is a QUESTION), and any found solution still traces line-for-line to tasks. Eval runs may restrict at materialization (§5.3/§8).
 
 ### 6.3 Verifier (fresh, evidence-or-zero)
-The §5.2 procedure, as an agent-def: never saw the Implementer's reasoning; builds the coverage matrix; runs L1+L2; grades L3 against the anchored rubric; performs the intent-vs-actual diff and the deviation cross-check; outputs PASS only if coverage is fully MET, objective gates green, diff fully maps to plan+spec, and every real deviation was declared. **Reports, does not fix.**
+The §5.2 procedure, as an agent-def: never saw the Implementer's reasoning; builds the coverage matrix; runs L1+L2; grades L3 against the anchored rubric; performs the intent-vs-actual diff and the deviation cross-check; outputs PASS only if coverage is fully MET, objective gates green, diff fully maps to plan+spec, and every real deviation was declared. **Reports, does not fix** — a behavioral rule (default toolset, §5.3): it changes nothing it grades.
 
 ## 7. Escalation, human-in-the-loop, and consent
 
@@ -210,10 +210,10 @@ Authority rides the **launch context, not the agent** (agent-definition §7, loc
 ## 8. Runtime and isolation
 
 - **ClaudeboxProvider (the seam).** Every Mode-B step runs through the custom provider (~250–400 LOC Python, fork-carried — §2): compile the agent-def (agent-definition §5) → `claude -p --agent <role>` inside the change's claudebox → capture the structured result. **Never** Conductor's default `claude` provider (raw API — would never see the materialized agent, its skills, or the sandbox). Shared with agent-definition (§14.6).
-- **Per-agent skill/plugin overlay.** Each agent's sandbox mounts the provisioning overlay (agent-definition §5.1) over `~/.claude/skills` + `~/.claude/plugins`, empty-by-default so no host operator scope leaks. The primitives' *ongoing* skills ride the worktree channel for free.
+- **Per-agent materialized `.claude`.** Each agent's sandbox gets a caller-materialized artificial `~/.claude` (skills/ + plugins/ + settings.json + role CLAUDE.md) copied in via claudebox's `provisioning.claude_dir_source` (agent-definition §5.1) — **no host `~/.claude` bind**, only `.credentials.json` injected — so the host operator's scope is physically absent, not just shadowed. The primitives' *ongoing* skills ride the worktree channel for free.
 - **Sandbox constraints (from the 2026-07-07 spike, §16).** The spike costed the anti-reward-hacking constraints against the claudebox fork's actual source and concluded:
-  - **No web tools for the Implementer** — the free, effective version of "deny web egress." Done at the agent-def / settings layer (`disallowedTools` / the skills allow-list), zero claudebox plumbing. Kills the "google the answer / find the merged PR" channel. (Residual: the image ships `curl`/`bash`, so it is a guardrail against an honest agent, not an airtight boundary — acceptable for our threat model.)
-  - **Read-only test/spec mounts** — a nested `:ro` mount over the RW worktree (~15–30 LOC). **Not** a standalone task: it rides the claudebox overlay seam we are already building (near-zero marginal cost there).
+  - **Tool policy — REVISED 2026-07-09 (user-locked; supersedes the spike's "no web tools for the Implementer").** Every cast agent ships the **default Claude Code toolset** — per-role tool surgery judged unnecessary complexity. Discipline is behavioral (persona contracts) + structural (author≠verifier, deterministic gates, counter-owned escalation, human-cleared L3). Field research backs default-allow: web denial has documented capability cost (Codex re-shipped internet in 3 weeks; OpenHands-Versa +9.1pp from browsing; Factory telemetry = web use dominated by docs/API refs). Eval/benchmark runs MAY restrict the Implementer at materialization — the Factory pattern (web in production, revoked for its own SWE-bench run), a one-line persona-frontmatter edit; never a box-wide `settings.json` deny (survives `bypassPermissions`, and the roles share the box). (Residual, unchanged: the image ships `curl`/`bash` and egress is open — tool policy was never an egress boundary; fetched web content is injection surface in a box holding OAuth creds — accepted.)
+  - **Read-only test/spec mounts** — a nested `:ro` mount over the RW worktree (~15–30 LOC). **Not** a standalone task: it rides the claudebox `claude_dir_source` provisioning seam we are already building (near-zero marginal cost there).
   - **Network-egress control — rejected.** `--network none` is a non-starter (the in-container `claude` needs `api.anthropic.com`); selective egress needs a fragile proxy+firewall that is effectively defeated on Docker Desktop/macOS — the fork's own `todo/host-isolation.md` already reached this conclusion and accepted the limitation.
   - **Git-history denial — rejected.** Meaningless for net-new feature work (no "fix commit" to find) and invasive to implement.
 
@@ -246,7 +246,7 @@ Mirrors the siblings' shape, adapted to a module that *extends* an engine rather
 The behavioral contracts (§6) shipped as the Implementer/Verifier/Orchestrator agent-defs (kentra's branded cast) + any operator skill (e.g. a `resolve-escalation` skill for the Mode-A human). Thin — this module is driven by Conductor, not conversationally.
 
 ### 11.3 Layer 3 — INTEGRATIONS
-Conductor (extended), claudebox (runtime + overlay seam), agent-definition (the personas), spec-lifecycle (plan + gates + the §5.5 additions), adr-sourced-constitution (governed HOW), Stage 4 (LiteLLM+Langfuse — reads the correlation metadata), Stage 5 (the controller — reads the per-variant seam).
+Conductor (extended), claudebox (runtime + `claude_dir_source` provisioning seam), agent-definition (the personas), spec-lifecycle (plan + gates + the §5.5 additions), adr-sourced-constitution (governed HOW), Stage 4 (LiteLLM+Langfuse — reads the correlation metadata), Stage 5 (the controller — reads the per-variant seam).
 
 ### 11.4 Neutral mechanism vs. branded methodology
 Per ADR-0002. The **mechanism** — the Conductor-driving execution loop, the ClaudeboxProvider, the verification harness, the escalation state machine, the MCP — is framework-neutral and reusable → candidate **neutral primitive** (own repo + submodule). The **branded composition** — the specific kentra cast, the concrete workflow wiring, the methodology — is `kentra-`-layer content (harness / `kentra-sdlc`). The exact neutral/branded cut + the repo name are open (§14.1).
@@ -286,7 +286,7 @@ Versioned like the siblings (unknown `schemaVersion` ⇒ refuse; no migration ma
 ## 14. Open items — build-time spikes (not blockers)
 
 1. **Neutral/branded cut + repo name (§11.4).** ✅ **RESOLVED 2026-07-07: `agent-orchestration`** (user lock); the cut is the plan's P1 — neutral repo = templates + harness + resume seam + MCP (+ the `kentra-io/conductor` fork carrying the provider); branded layer (kentra cast, hand-materialized personas, concrete wiring) stays in the harness.
-2. **Coarse-then-fine or fine-direct.** ✅ **RESOLVED 2026-07-07: fine-direct.** The coarse wrap's inner loop (opaque native nesting) is throwaway; the plan sequences the shared plumbing first (overlay seam → ClaudeboxProvider → single-milestone loop → ladder → verification layers) so an early end-to-end demo still exists without building a disposable mode. See [`orchestration-implementation-plan.md`](./orchestration-implementation-plan.md).
+2. **Coarse-then-fine or fine-direct.** ✅ **RESOLVED 2026-07-07: fine-direct.** The coarse wrap's inner loop (opaque native nesting) is throwaway; the plan sequences the shared plumbing first (`claude_dir_source` provisioning seam → ClaudeboxProvider → single-milestone loop → ladder → verification layers) so an early end-to-end demo still exists without building a disposable mode. See [`orchestration-implementation-plan.md`](./orchestration-implementation-plan.md).
 3. **Canonical home of `Needs human input` (§7.1).** Conductor run-state vs. a `spec-lifecycle` change status vs. a GitHub Projects field — where the change-level status is authoritative and how the three views stay consistent.
 4. **The `spec-lifecycle` §5.5 change** (plan-template validation contract + archive tasks-gate + real `apply` block). Its own change folder; this module depends on it. (The deferred "execution seam" from the handoff — the orchestrator now exists, so it's unblocked.)
 5. **Trigger mechanism (§13).** Poll `lifecycle status` for plan-approved changes vs. explicit `execute-change` invocation for v1.

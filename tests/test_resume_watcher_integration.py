@@ -185,8 +185,17 @@ class TestFreshRunOverRemainingChangedPlan:
         fresh_script = write_stub_script(
             tmp_path / "fresh_script",
             {
-                "implementer": [{"content": {"diff_summary": "reworked"}}],
-                "verifier": [{"content": {"pass": True, "notes": "good now"}}],
+                "implementer": [{"content": {"diff_summary": "reworked", "halt": "none"}}],
+                "verifier": [
+                    {
+                        "content": {
+                            "pass": True,
+                            "notes": "good now",
+                            "score": 1.0,
+                            "violations": "none",
+                        }
+                    }
+                ],
             },
         )
         fresh_env = {**env, "CONDUCTOR_STUB_SCRIPT": str(fresh_script)}
