@@ -6,8 +6,9 @@ the M6 live-box recipe (proven manually 2026-07-09; see
 `implementation-plan.md` M8 and `workflows/README.md`): `git worktree add` ->
 materialize a minimal `.agent-claude` (`claude_dir_source`) + copy the cast
 personas into `<worktree>/.claude/agents/` -> write
-`<worktree>/.claudebox/config.yaml` -> `cb run` non-interactively -> resolve
-the box via `docker ps --filter label=claudebox.project-path=<worktree>`.
+`<worktree>/.claudebox/config.yaml` -> `cb run --detach` (ensure/provision the
+box and exit 0 without an interactive attach) -> resolve the box via
+`docker ps --filter label=claudebox.project-path=<worktree>`.
 
 Concurrency (P10) is process-per-change: this module spawns exactly one
 `conductor run` child process per invocation, in the change's own worktree,
@@ -73,8 +74,8 @@ the brief's `{enabled: bool}` shape, logged here since it is a real, if
 small, judgment call): `box.enabled=true` always does the (docker-free)
 *materialization* half of the recipe -- `.agent-claude/` + persona copy +
 `.claudebox/config.yaml` -- which is pure file I/O and fully hermetic. Only
-`box.start=true` (the default) goes on to actually run `cb run` + resolve
-the box via `docker ps`, which needs a real Docker daemon and a built
+`box.start=true` (the default) goes on to actually run `cb run --detach` +
+resolve the box via `docker ps`, which needs a real Docker daemon and a built
 claudebox image -- not something an every-PR hermetic test should require.
 `tests/test_launch_change.py` exercises `box.enabled=true, box.start=false`
 to prove the materialization is byte-correct without Docker, and
@@ -121,6 +122,26 @@ class ChangeLaunchError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+def _registered_worktrees(repo: Path) -> dict[str, str | None]:
+    """Map each registered worktree's real path -> its branch ref (or None if
+    detached), parsed from `git worktree list --porcelain`."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    entries: dict[str, str | None] = {}
+    current: str | None = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            current = os.path.realpath(line[len("worktree ") :])
+            entries[current] = None
+        elif line.startswith("branch ") and current is not None:
+            entries[current] = line[len("branch ") :]
+    return entries
+
+
 def create_worktree(repo: str | Path, worktree_path: str | Path, branch: str) -> Path:
     """`git -C <repo> worktree add <worktree_path> [-b] <branch>`.
 
@@ -128,10 +149,28 @@ def create_worktree(repo: str | Path, worktree_path: str | Path, branch: str) ->
     in `repo`; otherwise checks out the existing branch into the new
     worktree (a re-launch of the same change against a branch a prior
     launch already created). Returns the resolved worktree path.
+
+    A re-launch of the same change derives the *same* worktree path and
+    branch (both from `change_id`), so an already-registered worktree at
+    `worktree_path` for `branch` is an idempotent no-op — its path is
+    returned unchanged. A worktree registered there for a *different* branch
+    is a conflict and raises.
     """
     repo = Path(repo)
     worktree_path = Path(worktree_path)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
+    resolved = os.path.realpath(worktree_path)
+    registered = _registered_worktrees(repo)
+    if resolved in registered:
+        existing_branch = registered[resolved]
+        if existing_branch == f"refs/heads/{branch}":
+            return Path(resolved)
+        raise ChangeLaunchError(
+            f"worktree {resolved} already exists on branch "
+            f"{existing_branch or '(detached)'}, not the expected {branch}; "
+            f"remove it with `git -C {repo} worktree remove {resolved}` and retry"
+        )
 
     exists = (
         subprocess.run(
@@ -218,18 +257,38 @@ def start_box(
     docker_bin: str = "docker",
     timeout: float = 120.0,
 ) -> str:
-    """`( cd <worktree> && cb run </dev/null )`, then resolve the box name.
+    """`( cd <worktree> && cb run --detach )`, then resolve the box name.
 
-    Non-interactive: stdin is `/dev/null` (`subprocess.DEVNULL`), matching
-    the proven M6 live-box recipe. Resolves the box via
+    Non-interactive: `cb run --detach` ensures/creates/provisions the box and
+    exits 0 after printing its name, WITHOUT attaching an interactive Claude
+    session (stdin stays `subprocess.DEVNULL`). This replaces the earlier
+    bare-`cb run` recipe, which — with a non-terminal stdin — unconditionally
+    tried `docker exec -it ... claude` and exited 1 *after the box was already
+    up*, so the launcher's strict `returncode != 0` check aborted a healthy
+    launch. With `--detach` a nonzero exit now means a genuine
+    ensure/provision failure. Resolves the box via
     `docker ps --filter "label=claudebox.project-path=<worktree>" --format
     '{{.Names}}'` (the same lookup `cb`'s own docs describe for locating a
     project's running box). Raises `ChangeLaunchError` if `cb run` fails or
     no matching box is found.
+
+    Requires a `cb` build that understands `--detach`; older binaries reject
+    the flag loudly (exit 1 + usage), which surfaces as a clear
+    `ChangeLaunchError` — no version sniffing needed.
     """
     worktree = Path(worktree).resolve()
+    # Resolve `cb` on PATH up front: a bare name that is only a shell
+    # alias/function (or a PATH that differs from the interactive shell) would
+    # otherwise surface as an opaque FileNotFoundError from execvp. An absolute
+    # path is used as-is so callers can point `box.cb_bin` at the real binary.
+    cb_path = cb_bin if os.path.isabs(cb_bin) else shutil.which(cb_bin)
+    if not cb_path:
+        raise ChangeLaunchError(
+            f"`{cb_bin}` not found on PATH; if it is a shell alias/function set "
+            f"`box.cb_bin` to the absolute path of the claudebox binary"
+        )
     proc = subprocess.run(
-        [cb_bin, "run"],
+        [cb_path, "run", "--detach"],
         cwd=worktree,
         stdin=subprocess.DEVNULL,
         capture_output=True,

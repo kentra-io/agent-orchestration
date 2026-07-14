@@ -20,12 +20,15 @@ from pathlib import Path
 from launch_testbed import git_env, init_repo, write_personas, write_plan_fixture
 from stub_provider import write_stub_script
 
+from orchestration.launch import change as change_mod
 from orchestration.launch.change import (
+    ChangeLaunchError,
     create_worktree,
     launch,
     main,
     materialize_box,
     resolve_plan,
+    start_box,
 )
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -85,6 +88,35 @@ class TestCreateWorktree:
 
         assert second.is_dir()
         assert (second / "README.md").is_file()
+
+    def test_reuses_the_worktree_when_the_same_path_already_exists(
+        self, tmp_path: Path
+    ) -> None:
+        # A re-launch of the same change derives the SAME worktree path and
+        # branch (both from change_id), so `git worktree add` would hit an
+        # already-registered worktree. That is an idempotent no-op, not an error.
+        repo = init_repo(tmp_path / "repo")
+        path = tmp_path / "wt" / "c1"
+        first = create_worktree(repo, path, "change/c1")
+
+        second = create_worktree(repo, path, "change/c1")
+
+        assert second == first
+        assert second.is_dir()
+        assert (second / "README.md").is_file()
+
+    def test_rejects_a_worktree_path_registered_to_another_branch(
+        self, tmp_path: Path
+    ) -> None:
+        repo = init_repo(tmp_path / "repo")
+        path = tmp_path / "wt" / "shared"
+        create_worktree(repo, path, "change/c1")
+
+        try:
+            create_worktree(repo, path, "change/c2")
+            raise AssertionError("expected a ChangeLaunchError")
+        except ChangeLaunchError as exc:
+            assert "change/c1" in str(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +186,34 @@ class TestLaunchBoxStep:
         assert Path(report["box"]["claude_dir_source"]).is_dir()
         assert set(report["box"]["personas"]) == {"implementer", "verifier", "orchestrator"}
         assert (Path(report["worktree"]) / ".claudebox" / "config.yaml").is_file()
+
+
+# ---------------------------------------------------------------------------
+# start_box -- ensures the box via `cb run --detach` (no interactive attach)
+# ---------------------------------------------------------------------------
+
+
+class TestStartBox:
+    def test_cb_run_uses_detach_flag(self, tmp_path: Path, monkeypatch) -> None:
+        """`cb run --detach` ensures/provisions the box and exits 0 without an
+        interactive attach; the bare `cb run` used to exit 1 under DEVNULL stdin
+        after the box was already up, aborting a healthy launch."""
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        calls: list[list[str]] = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(list(argv))
+            # cb run --detach -> exit 0; docker ps -> the resolved box name.
+            return subprocess.CompletedProcess(argv, 0, stdout="claudebox-abc\n", stderr="")
+
+        monkeypatch.setattr(change_mod.subprocess, "run", fake_run)
+
+        # Absolute cb_bin so shutil.which() isn't consulted.
+        name = start_box(worktree, cb_bin="/abs/mycb", docker_bin="/abs/docker")
+
+        assert name == "claudebox-abc"
+        assert calls[0] == ["/abs/mycb", "run", "--detach"]
 
 
 # ---------------------------------------------------------------------------
