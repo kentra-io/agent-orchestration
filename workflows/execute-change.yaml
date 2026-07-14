@@ -69,6 +69,31 @@ workflow:
         id, title, steps, contract). Stands in, in the hermetic tier, for
         the real `lifecycle apply <change> --format json` machine-readable
         plan surface -- see the header note above.
+    box:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The claudebox box/container id the ClaudeboxProvider `cb exec`s into.
+        Supplied by the M8 launcher (`orchestration.launch.change`) as
+        `--input box=<id>`; forwarded to milestone.yaml via milestone_step's
+        input_mapping and read by the provider as workflow.input.box.
+        Declared `required: false, default: ""` (NOT required) on purpose:
+        Conductor does not validate required-input PRESENCE at run start
+        (engine `_apply_input_defaults` silently omits a missing required
+        input), and templates render under Jinja StrictUndefined -- so a
+        required-but-absent box would crash the stub tier on template render
+        rather than fail loudly at launch. The empty default renders cleanly
+        in the stub tier (which never uses the provider); the live tier's
+        loud failure is the provider's own non-retryable ProviderError when
+        box is empty at first cast-agent turn.
+    worktree:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        Absolute path of the box's worktree, forwarded by the provider as
+        `cb exec --workdir <worktree>`. Optional; launcher supplies it.
     attempt_threshold:
       type: number
       required: false
@@ -168,6 +193,13 @@ agents:
       attempt_threshold: "{{ workflow.input.attempt_threshold }}"
       gates_l1_command: "{{ workflow.input.gates_l1_command }}"
       notify_dry_run: "{{ workflow.input.notify_dry_run }}"
+      # The cast agents that actually call the ClaudeboxProvider live in the
+      # NESTED milestone.yaml, not at this root -- and a `type: workflow`
+      # child's `workflow.input` is populated ONLY from this input_mapping
+      # (it does not inherit the root's workflow.input). So box/worktree
+      # must be forwarded here for the provider to find them downstream.
+      box: "{{ workflow.input.box }}"
+      worktree: "{{ workflow.input.worktree }}"
     routes:
       - to: cursor
 

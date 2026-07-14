@@ -52,6 +52,31 @@ workflow:
       type: string
       required: true
       description: Identifier for this milestone (used in prompts/labels/events).
+    box:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The claudebox box/container id the ClaudeboxProvider `cb exec`s into.
+        Read by the provider as workflow.input.box for the implementer/
+        verifier/orchestrator cast agents below. Forwarded here by
+        execute-change.yaml's milestone_step input_mapping (a nested
+        `type: workflow` child's workflow.input comes ONLY from that
+        mapping). Declared `required: false, default: ""` -- NOT required --
+        for the same reason as execute-change.yaml: Conductor does not
+        validate required-input presence at run start, and the empty default
+        renders cleanly under Jinja StrictUndefined in the stub tier (which
+        runs milestone.yaml standalone with `--provider stub`, never using
+        the provider). The live tier's loud failure is the provider's own
+        non-retryable ProviderError when box is empty.
+    worktree:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        Absolute path of the box's worktree, forwarded by the provider as
+        `cb exec --workdir <worktree>`. Optional; supplied via
+        execute-change.yaml's milestone_step input_mapping.
     milestone_summary:
       type: string
       required: false
