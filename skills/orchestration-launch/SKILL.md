@@ -19,7 +19,7 @@ description: Start or resume an agent-orchestration execute-change run from any 
 orchestration launch '{
   "repo": "/Users/jony/code/kentra/<project>",
   "change_id": "<issue>-<slug>",
-  "worktree_path": "/Users/jony/code/kentra/<project>-wt-<slug>",
+  "worktree_root": "/Users/jony/code/kentra/<project>-worktrees",
   "branch": "<issue>-<slug>",
   "issue": <issue-number>,
   "box": {"enabled": true},
@@ -32,10 +32,12 @@ The daemon then: runs a box health probe (fails LOUD with a classified cause
 worktree, provisions the box, assigns a dashboard port, spawns
 `conductor run --web`, and registers everything in
 `~/.agent-orchestration/runs/`. The response carries the report: pid,
-dashboard URL, registry path, log legend.
+dashboard URL, registry path, log legend. The launcher creates the actual
+worktree at `<worktree_root>/<change-id>` (`worktree_root` is optional — it
+defaults to `<repo>/.worktrees`).
 
 - `--direct` bypasses a down daemon (in-process spawn; the daemon reconciles
-  the run's fate later). `worktree_path` MUST live under the daemon's mounted
+  the run's fate later). `worktree_root` MUST live under the daemon's mounted
   code root.
 
 ## Resume

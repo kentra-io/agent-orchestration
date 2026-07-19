@@ -25,6 +25,9 @@ back to reading `~/.agent-orchestration/runs/` directly).
 - `dead: oauth-expired` — box OAuth expired. Remedy: `cb login` from the
   worktree, then resume.
 - `dead: api-transient` — provider blip killed the run. Remedy: resume.
+- `dead: unknown` — the run died with an unrecognized error; the classified
+  cause was not one of the known kinds. Read `orchestration status <change-id>`
+  for the raw detail tail, then decide (often a resume is safe).
 - `dead: unreconciled` — process gone, exit never observed; the daemon's next
   reconcile pass (or any `orchestration runs` call) classifies it.
 
