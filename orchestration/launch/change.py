@@ -98,6 +98,7 @@ from orchestration.launch.checkpoint_env import (
     persistent_checkpoint_env,
     persistent_checkpoint_subprocess_env,
 )
+from orchestration.obs.classify import classify
 from orchestration.resume.plan import (
     PlanReadError,
     load_milestones,
@@ -319,6 +320,42 @@ def start_box(
     return names[0]
 
 
+def health_probe(
+    box: str,
+    docker_bin: str = "docker",
+    timeout: float = 60.0,
+    raise_on_fail: bool = False,
+) -> dict[str, Any]:
+    """`docker exec <box> claude -p OK` before spawning conductor.
+
+    Fails loud-and-early with a classified cause (design §5.1) instead of the
+    run dying 3s into the first agent turn with a masked error.
+    """
+    try:
+        proc = subprocess.run(
+            [docker_bin, "exec", box, "claude", "-p", "OK"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        verdict = classify(proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:], None)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        verdict = classify(1, "", f"probe could not run: {exc}", None)
+    report = {
+        "ok": verdict.kind == "success",
+        "classified": verdict.kind,
+        "remedy": verdict.remedy,
+        "detail": verdict.detail[-2000:],
+    }
+    if raise_on_fail and not report["ok"]:
+        raise ChangeLaunchError(
+            f"box health probe failed [{report['classified']}]: {report['detail'][:300]}"
+            + (f" — remedy: {report['remedy']}" if report["remedy"] else "")
+        )
+    return report
+
+
 # ---------------------------------------------------------------------------
 # Step 3: plan resolution (reuses orchestration.resume.plan -- M7)
 # ---------------------------------------------------------------------------
@@ -452,6 +489,12 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
                 docker_bin=box_cfg.get("docker_bin", "docker"),
                 timeout=float(box_cfg.get("cb_run_timeout", 120.0)),
             )
+    if box_enabled and box_report.get("name") and bool(box_cfg.get("health_probe", True)):
+        box_report["health_probe"] = health_probe(
+            box_report["name"],
+            docker_bin=box_cfg.get("docker_bin", "docker"),
+            raise_on_fail=True,
+        )
 
     tmpdir = Path(conductor_cfg.get("tmpdir") or (worktree / ".conductor-tmp"))
     tmpdir.mkdir(parents=True, exist_ok=True)
