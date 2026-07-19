@@ -14,6 +14,9 @@ dependencies = [
     "mcp>=1.28.0",
 ]
 
+[project.scripts]
+orchestration = "orchestration.__main__:main"
+
 [tool.uv.sources]
 conductor-cli = { git = "https://github.com/kentra-io/conductor.git", rev = "5461008b7d5adf0beae30f9459e4b088c9d4d7f9" }
 
