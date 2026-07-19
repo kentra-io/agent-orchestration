@@ -1,0 +1,10 @@
+{
+  "name": "agent-orchestration-skills",
+  "description": "Operator and consumer skills for the agent-orchestration module: monitor live execute-change runs (status fold, classified death causes, dashboard/index surfaces) and launch/resume runs through the orchestrator daemon from any session.",
+  "version": "0.1.0",
+  "author": { "name": "Kentra" },
+  "homepage": "https://github.com/kentra-io/agent-orchestration",
+  "repository": "https://github.com/kentra-io/agent-orchestration",
+  "license": "MIT",
+  "keywords": ["orchestration", "conductor", "claudebox", "observability", "agentic"]
+}
