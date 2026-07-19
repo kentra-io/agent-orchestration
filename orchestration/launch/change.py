@@ -91,6 +91,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,7 @@ from orchestration.launch.checkpoint_env import (
     persistent_checkpoint_env,
     persistent_checkpoint_subprocess_env,
 )
+from orchestration.obs import registry as obs_registry
 from orchestration.obs.classify import classify
 from orchestration.resume.plan import (
     PlanReadError,
@@ -447,11 +449,22 @@ def _find_events_path(tmp_dir: Path, timeout: float = 2.0) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def launch(payload: dict[str, Any]) -> dict[str, Any]:
+def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run the full M8 launch recipe for one change; return the report JSON.
 
     See the module docstring for the input/output shapes and the exit-code
     convention `main` applies on top of this.
+
+    `proc_holder`: optional out-param seam for a caller (e.g. a background
+    daemon) that needs the live `subprocess.Popen` handle -- if given, the
+    conductor child process is stashed at `proc_holder["proc"]` the moment
+    it is spawned (dry runs never populate it).
+
+    Registry (`orchestration.obs.registry`): every launch (including
+    `dry_run`) writes a facts-only registry entry keyed by `repo_slug` +
+    `change_id`; a spawned conductor child additionally appends an
+    incarnation (pid/web_port/dashboard_url) and, once a synchronous
+    (`wait: true`) launch's child exits, records its `exit_code`.
     """
     repo = payload.get("repo")
     change_id = payload.get("change_id")
@@ -502,6 +515,17 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
 
     tmpdir = Path(conductor_cfg.get("tmpdir") or (worktree / ".conductor-tmp"))
     tmpdir.mkdir(parents=True, exist_ok=True)
+
+    registry_entry = obs_registry.new_entry(
+        repo=str(repo_path),
+        change_id=change_id,
+        worktree=str(worktree),
+        branch=branch,
+        box=box_report.get("name"),
+        tmpdir=str(tmpdir),
+        issue=payload.get("issue"),
+    )
+    obs_registry.write_entry(registry_entry)
 
     plan_fixture_path = resolve_plan(
         worktree,
@@ -557,6 +581,11 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
         "events_path": None,
         "stdout_path": None,
         "stderr_path": None,
+        "registry_path": str(obs_registry.entry_path(registry_entry["repo_slug"], change_id)),
+        "log_legend": {
+            "conductor.stdout.log": "final JSON result only (empty until the run finishes)",
+            "conductor.stderr.log": "live progress UI (Rich panels) — this is the healthy channel",
+        },
     }
 
     if dry_run:
@@ -580,12 +609,31 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
             stdin=subprocess.DEVNULL,
             text=True,
         )
+        if proc_holder is not None:
+            proc_holder["proc"] = proc
+
+    web_port = int(conductor_cfg.get("web_port", 0))
+    obs_registry.append_incarnation(
+        registry_entry["repo_slug"],
+        change_id,
+        {
+            "pid": proc.pid,
+            "started_at": datetime.now(UTC).isoformat(),
+            "web_port": web_port or None,
+            "dashboard_url": f"http://localhost:{web_port}" if web_port else None,
+            "exit_code": None,
+            "classified": None,
+        },
+    )
 
     if wait:
         returncode = proc.wait()
         report["returncode"] = returncode
         report["pid"] = proc.pid
         report["events_path"] = _find_events_path(tmpdir)
+        obs_registry.update_incarnation(
+            registry_entry["repo_slug"], change_id, exit_code=returncode
+        )
     else:
         report["pid"] = proc.pid
         report["events_path"] = _find_events_path(tmpdir, timeout=0.5)
