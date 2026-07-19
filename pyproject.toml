@@ -18,7 +18,7 @@ dependencies = [
 orchestration = "orchestration.__main__:main"
 
 [tool.uv.sources]
-conductor-cli = { git = "https://github.com/kentra-io/conductor.git", rev = "5461008b7d5adf0beae30f9459e4b088c9d4d7f9" }
+conductor-cli = { git = "https://github.com/kentra-io/conductor.git", rev = "088e35c5e68dfb35131b84d82afc5144e0908f1f" }
 
 [dependency-groups]
 dev = [
