@@ -22,6 +22,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Install lifecycle CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.1.0 -R kentra-io/spec-lifecycle \
+            -p 'lifecycle_*_linux_amd64.tar.gz' -O /tmp/lifecycle.tgz
+          sudo tar -xzf /tmp/lifecycle.tgz -C /usr/local/bin lifecycle
+          lifecycle --version || lifecycle version
+
       - name: Lint (ruff check)
         run: uv run ruff check
 
