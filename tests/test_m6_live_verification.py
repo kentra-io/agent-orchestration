@@ -125,12 +125,9 @@ def _run_cast_agent(box: str, fixture: MilestoneFixture, role: str, prompt: str)
         "stream-json",
         "--verbose",
     ]
-    proc = subprocess.run(
-        argv, capture_output=True, text=True, timeout=AGENT_TIMEOUT_SECONDS
-    )
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=AGENT_TIMEOUT_SECONDS)
     assert proc.returncode == 0, (
-        f"{role} subprocess failed (exit {proc.returncode}); "
-        f"stderr={proc.stderr[-2000:]!r}"
+        f"{role} subprocess failed (exit {proc.returncode}); stderr={proc.stderr[-2000:]!r}"
     )
 
     result_event: dict[str, Any] | None = None
@@ -208,9 +205,7 @@ fence) of exactly this shape:
 def _run_verifier(box: str, fixture: MilestoneFixture) -> dict[str, Any]:
     result_text = _run_cast_agent(box, fixture, "verifier", _verifier_prompt(fixture))
     verdict = _last_json_object(result_text)
-    assert verdict is not None, (
-        f"no JSON verdict found in verifier result: {result_text[-2000:]!r}"
-    )
+    assert verdict is not None, f"no JSON verdict found in verifier result: {result_text[-2000:]!r}"
     _assert_wellformed_verdict(verdict)  # DoD (f), on every parsed verdict
     return verdict
 
@@ -226,9 +221,7 @@ class TestVerifierCatchesPlantedDefects:
 
         assert verdict["pass"] is False, f"verifier passed a planted deviation: {verdict!r}"
         violations = str(verdict.get("violations", "")).lower()
-        assert "rogue" in violations, (
-            f"violations do not mention the rogue file: {verdict!r}"
-        )
+        assert "rogue" in violations, f"violations do not mention the rogue file: {verdict!r}"
 
     def test_false_completion_is_caught(self) -> None:
         """DoD (b): task 2 ticked `[x]` with an evidence note but no
@@ -355,12 +348,8 @@ class TestCleanMilestoneThroughLadder:
         # assertion shape as test_workflows_live.py).
         jsonl_files = list(tmp_dir.rglob("*.events.jsonl"))
         assert jsonl_files, "expected an event JSONL to be written"
-        events = [
-            json.loads(line) for line in jsonl_files[0].read_text().splitlines() if line
-        ]
-        completed = {
-            e["data"]["agent_name"] for e in events if e["type"] == "agent_completed"
-        }
+        events = [json.loads(line) for line in jsonl_files[0].read_text().splitlines() if line]
+        completed = {e["data"]["agent_name"] for e in events if e["type"] == "agent_completed"}
         assert {"implementer", "verifier"} <= completed, (
             f"cast steps missing from event log: {completed!r}"
         )

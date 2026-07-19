@@ -78,9 +78,7 @@ def _bootstrap_project(root: Path) -> None:
 def _write_change(root: Path, change_id: str, *, task_checked: bool) -> Path:
     change_dir = root / "openspec" / "changes" / change_id
     change_dir.mkdir(parents=True)
-    (change_dir / "proposal.md").write_text(
-        _PROPOSAL.format(n=change_id), encoding="utf-8"
-    )
+    (change_dir / "proposal.md").write_text(_PROPOSAL.format(n=change_id), encoding="utf-8")
     (change_dir / "tasks.md").write_text(
         _TASKS_TEMPLATE.format(box="x" if task_checked else " "), encoding="utf-8"
     )

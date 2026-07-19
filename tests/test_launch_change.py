@@ -89,9 +89,7 @@ class TestCreateWorktree:
         assert second.is_dir()
         assert (second / "README.md").is_file()
 
-    def test_reuses_the_worktree_when_the_same_path_already_exists(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reuses_the_worktree_when_the_same_path_already_exists(self, tmp_path: Path) -> None:
         # A re-launch of the same change derives the SAME worktree path and
         # branch (both from change_id), so `git worktree add` would hit an
         # already-registered worktree. That is an idempotent no-op, not an error.
@@ -105,9 +103,7 @@ class TestCreateWorktree:
         assert second.is_dir()
         assert (second / "README.md").is_file()
 
-    def test_rejects_a_worktree_path_registered_to_another_branch(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rejects_a_worktree_path_registered_to_another_branch(self, tmp_path: Path) -> None:
         repo = init_repo(tmp_path / "repo")
         path = tmp_path / "wt" / "shared"
         create_worktree(repo, path, "change/c1")

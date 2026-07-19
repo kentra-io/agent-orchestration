@@ -67,9 +67,7 @@ def _run_stub(tmp_path: Path, steps: dict[str, list[dict]]) -> tuple[dict, list[
 
 
 class TestStubTierMatchesLiveShape:
-    def test_happy_path_two_step_control_flow_and_structured_output(
-        self, tmp_path: Path
-    ) -> None:
+    def test_happy_path_two_step_control_flow_and_structured_output(self, tmp_path: Path) -> None:
         output, events = _run_stub(
             tmp_path,
             {

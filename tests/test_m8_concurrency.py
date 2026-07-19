@@ -133,12 +133,12 @@ class TestTwoChangesRunConcurrentlyWithoutInterference:
 
         _, status_a = os.waitpid(pid_a, 0)
         _, status_b = os.waitpid(pid_b, 0)
-        assert os.WIFEXITED(status_a) and os.WEXITSTATUS(status_a) == 0, (
-            Path(report_a["stderr_path"]).read_text(encoding="utf-8")
-        )
-        assert os.WIFEXITED(status_b) and os.WEXITSTATUS(status_b) == 0, (
-            Path(report_b["stderr_path"]).read_text(encoding="utf-8")
-        )
+        assert os.WIFEXITED(status_a) and os.WEXITSTATUS(status_a) == 0, Path(
+            report_a["stderr_path"]
+        ).read_text(encoding="utf-8")
+        assert os.WIFEXITED(status_b) and os.WEXITSTATUS(status_b) == 0, Path(
+            report_b["stderr_path"]
+        ).read_text(encoding="utf-8")
 
         worktree_a = Path(report_a["worktree"])
         worktree_b = Path(report_b["worktree"])
@@ -179,9 +179,12 @@ class TestTwoChangesRunConcurrentlyWithoutInterference:
             check=True,
         ).stdout.strip()
         assert main_sha_after == main_sha_before
-        assert subprocess.run(
-            ["git", "-C", str(repo), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout == ""
+        assert (
+            subprocess.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            == ""
+        )
