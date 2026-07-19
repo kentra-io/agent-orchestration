@@ -67,9 +67,7 @@ _GITIGNORE = "__pycache__/\n*.pyc\n.pytest_cache/\n"
 
 # Root conftest so `python3 -m pytest -q` run from the fixture root puts the
 # fixture root on sys.path (same trick as tests/fixtures/testbed/conftest.py).
-_CONFTEST = (
-    "# Root conftest: makes the fixture root importable (src.*) under pytest.\n"
-)
+_CONFTEST = "# Root conftest: makes the fixture root importable (src.*) under pytest.\n"
 
 _SMOKE_TEST = "def test_smoke() -> None:\n    assert True\n"
 
@@ -149,8 +147,7 @@ def test_basic_slug() -> None:
 """
 
 _ROGUE_FILE = (
-    "# Planted defect: out-of-path change traceable to no task/requirement.\n"
-    "ROGUE = True\n"
+    "# Planted defect: out-of-path change traceable to no task/requirement.\nROGUE = True\n"
 )
 
 _AMBIGUOUS_SPEC = _SLUG_SPEC  # the spec is silent about caching -- that's the point
