@@ -414,6 +414,8 @@ def build_conductor_argv(
     silent: bool,
     provider: str | None,
     inputs: dict[str, str],
+    web: bool = False,
+    web_port: int = 0,
 ) -> list[str]:
     argv = [conductor_bin]
     if silent:
@@ -421,6 +423,8 @@ def build_conductor_argv(
     argv += ["run", workflow]
     if provider:
         argv += ["--provider", provider]
+    if web:
+        argv += ["--web", "--web-port", str(web_port)]
     for key, value in inputs.items():
         argv += ["--input", f"{key}={value}"]
     return argv
@@ -520,6 +524,8 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
         silent=bool(conductor_cfg.get("silent", True)),
         provider=conductor_cfg.get("provider"),
         inputs=inputs,
+        web=bool(conductor_cfg.get("web", False)),
+        web_port=int(conductor_cfg.get("web_port", 0)),
     )
 
     env = persistent_checkpoint_subprocess_env(tmpdir / "checkpoints")
@@ -532,6 +538,10 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
     # silently collapse two concurrent changes onto one shared checkpoint/
     # event dir (review finding 2026-07-09; P4/ADR-0002).
     env.update(persistent_checkpoint_env(tmpdir / "checkpoints"))
+    if bool(conductor_cfg.get("web", False)):
+        # bg-mode = auto-shutdown after workflow end + client disconnect; the
+        # daemon (not bg_runner) owns the process, so only the env toggle is set.
+        env["CONDUCTOR_WEB_BG"] = "1"
 
     report: dict[str, Any] = {
         "worktree": str(worktree),
