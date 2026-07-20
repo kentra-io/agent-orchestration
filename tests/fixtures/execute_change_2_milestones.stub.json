@@ -1,0 +1,10 @@
+{
+  "steps": {
+    "implementer": [
+      {"content": {"diff_summary": "did it", "halt": "none"}}
+    ],
+    "verifier": [
+      {"content": {"pass": true, "notes": "good", "score": 1.0, "violations": "none"}}
+    ]
+  }
+}
