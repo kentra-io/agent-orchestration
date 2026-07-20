@@ -7,6 +7,11 @@ RUN go install github.com/kentra-io/spec-lifecycle/cmd/lifecycle@4d1f002755ac
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+# The daemon runs as root and drives `git worktree add` against host-owned repos
+# bind-mounted from the host (a different uid) — git refuses these as "dubious
+# ownership" unless they are trusted. The daemon only ever touches repos the
+# operator mounted, so trust all of them system-wide.
+RUN git config --system --add safe.directory '*'
 # docker CLI (static client only — the daemon talks to the mounted host socket)
 RUN curl -fsSL https://download.docker.com/linux/static/stable/aarch64/docker-27.5.1.tgz \
     | tar -xz --strip-components=1 -C /usr/local/bin docker/docker
