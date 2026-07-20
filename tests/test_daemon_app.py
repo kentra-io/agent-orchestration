@@ -1,3 +1,5 @@
+import os
+
 from fastapi.testclient import TestClient
 
 import orchestration.daemon.app as app_mod
@@ -66,3 +68,50 @@ def test_index_serves_html(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
     r = _client().get("/")
     assert r.status_code == 200 and "agent-orchestration" in r.text
+
+
+def test_index_dashboard_link_only_while_running(tmp_path, monkeypatch):
+    """The dashboard is served by the run's own conductor process — dead/done
+    runs must not render their (stale, possibly re-allocated) URL as a link."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    running = registry.new_entry(
+        repo="r1",
+        change_id="1-live",
+        worktree=str(tmp_path),
+        branch="b",
+        box=None,
+        tmpdir=str(tmp_path),
+    )
+    running["incarnations"].append(
+        {
+            "pid": os.getpid(),
+            "started_at": "x",
+            "web_port": 42001,
+            "dashboard_url": "http://localhost:42001",
+            "exit_code": None,
+            "classified": None,
+        }
+    )
+    registry.write_entry(running)
+    done = registry.new_entry(
+        repo="r2",
+        change_id="2-done",
+        worktree=str(tmp_path),
+        branch="b",
+        box=None,
+        tmpdir=str(tmp_path),
+    )
+    done["incarnations"].append(
+        {
+            "pid": 1,
+            "started_at": "x",
+            "web_port": 42002,
+            "dashboard_url": "http://localhost:42002",
+            "exit_code": 0,
+            "classified": "success",
+        }
+    )
+    registry.write_entry(done)
+    text = _client().get("/").text
+    assert "http://localhost:42001" in text
+    assert "http://localhost:42002" not in text

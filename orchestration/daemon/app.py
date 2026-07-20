@@ -92,7 +92,11 @@ def create_app(supervisor: Supervisor, token: str | None = None) -> FastAPI:
         rows = []
         for run in _folded_runs():
             last = run["incarnations"][-1] if run["incarnations"] else {}
-            dash = last.get("dashboard_url")
+            # The dashboard is served by the run's own conductor process, so
+            # the link is only live while that process is (state "running");
+            # for finished/dead runs the registry URL is historical — and the
+            # port may since have been re-allocated to a different run.
+            dash = last.get("dashboard_url") if run["derived"]["state"] == "running" else None
             issue = run.get("issue")
             issue_link = (
                 f'<a href="https://github.com/kentra-io/{run["repo_slug"]}/issues/{issue}">#{issue}</a>'
