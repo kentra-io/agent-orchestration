@@ -19,7 +19,12 @@ RUN curl -fsSL https://download.docker.com/linux/static/stable/aarch64/docker-27
 RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.86.0/gh_2.86.0_linux_arm64.tar.gz \
     | tar -xz --strip-components=2 -C /usr/local/bin gh_2.86.0_linux_arm64/bin/gh
 COPY --from=lifecycle-build /go/bin/lifecycle /usr/local/bin/lifecycle
-# cb (claudebox CLI) — private repo, so the binary is provided by the build context
+# claude CLI (native installer, standalone binary): cb's auth pre-flight shells
+# out to `claude auth status --json` before provisioning a box, so the daemon
+# image must carry it. Installs to /root/.local/bin (daemon runs as root).
+RUN curl -fsSL https://claude.ai/install.sh | bash
+# cb (claudebox CLI) — no prebuilt linux/arm64 release, so the binary is
+# provided by the build context (CI builds it from the pinned public ref)
 COPY bin/cb /usr/local/bin/cb
 
 WORKDIR /app
@@ -29,7 +34,7 @@ COPY workflows ./workflows
 COPY personas ./personas
 RUN pip install --no-cache-dir uv==0.11.27 \
     && UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev
-ENV PATH="/opt/venv/bin:${PATH}" \
+ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}" \
     CONDUCTOR_WEB_HOST=0.0.0.0 \
     ORCHESTRATION_WEB_PORT_RANGE=42000-42050
 EXPOSE 8765

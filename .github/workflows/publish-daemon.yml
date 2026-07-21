@@ -11,7 +11,7 @@ on:
     tags: ["v*"]
 
 env:
-  CLAUDEBOX_REF: eac20a6bec3a2c53c93d4094556581eced62d8c0
+  CLAUDEBOX_REF: 92d7855f654803dd7cef278d7607c65ae77e0a11
   IMAGE: ghcr.io/kentra-io/agent-orchestration-daemon
 
 jobs:
