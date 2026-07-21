@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from orchestration import client
+from orchestration.cli import daemon_cmd
 
 EXIT_OK, EXIT_USER, EXIT_ENV = 0, 1, 2
 
@@ -78,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="bypass the daemon: spawn in-process (reconciled later)",
     )
     p_launch.set_defaults(func=cmd_launch)
+
+    daemon_cmd.register(sub)
 
     return parser
 
