@@ -7,24 +7,27 @@ description: Start or resume an agent-orchestration execute-change run from any 
 
 ## Preconditions
 
-- The daemon is up (host: `make daemon-run` in agent-orchestration; check
-  `http://localhost:8765`). From a box, reach it at
-  `ORCHESTRATION_DAEMON_URL=http://host.docker.internal:8765`.
-- `ORCHESTRATION_DAEMON_TOKEN` must be set (env-injected into boxes via the
-  claudebox `config.yaml env:` pattern).
+- Host: `orch daemon start` (idempotent — pulls the image, generates the token
+  into `~/.agent-orchestration/daemon.json`, runs the container).
+- From a box: the daemon is reached via `ORCHESTRATION_DAEMON_URL=
+  http://host.docker.internal:8765` + `ORCHESTRATION_DAEMON_TOKEN` (env-injected
+  via the claudebox `config.yaml env:` pattern) — env always wins over daemon.json.
 
 ## Launch
 
 ```bash
-orchestration launch '{
-  "repo": "/Users/jony/code/kentra/<project>",
-  "change_id": "<issue>-<slug>",
-  "worktree_root": "/Users/jony/code/kentra/<project>-worktrees",
-  "branch": "<issue>-<slug>",
-  "issue": <issue-number>,
-  "box": {"enabled": true},
-  "conductor": {"workflow": "workflows/execute-change.yaml"}
-}'
+orch launch <change-id> [--repo /path/to/project] [--issue N] [--branch B]
+```
+
+Run from inside the target repo (repo defaults to the git toplevel).
+Production tier: box enabled, plan from `lifecycle apply <change> --format json`,
+async return + dashboard auto-open. Hermetic demo: `orch launch <id> --stub`.
+
+Raw-payload escape hatch (the old curl-era surface, unchanged semantics):
+
+```bash
+orch launch --payload '<json>'        # or a file path, or - for stdin
+orch launch --payload payload.json --direct   # bypass a down daemon (dev checkout only)
 ```
 
 The daemon then: runs a box health probe (fails LOUD with a classified cause
@@ -36,12 +39,18 @@ dashboard URL, registry path, log legend. The launcher creates the actual
 worktree at `<worktree_root>/<change-id>` (`worktree_root` is optional — it
 defaults to `<repo>/.worktrees`).
 
-- `--direct` bypasses a down daemon (in-process spawn; the daemon reconciles
-  the run's fate later). `worktree_root` MUST live under the daemon's mounted
-  code root.
+- `--direct` (with `--payload`) bypasses a down daemon (in-process spawn; the
+  daemon reconciles the run's fate later). `worktree_root` MUST live under the
+  daemon's mounted code root.
 
 ## Resume
 
-Resume is CLI-direct in this version (`conductor resume` per the module's
-crash-then-resume model) — see `orchestration/resume/README.md`. After fixing
-the cause (`cb login`, plan edit + approval), resume from the worktree.
+```bash
+orch resume <change-id> [--repo /path/to/project]
+```
+
+404 = nothing registered; 409 = still running (or nothing left to do). The
+daemon re-derives remaining milestones from the CURRENT plan — completed
+milestone ids are never re-run. After fixing the cause (`cb login`, plan edit
++ approval), resume from the target repo (not necessarily the worktree — the
+daemon resumes the change's existing worktree itself).

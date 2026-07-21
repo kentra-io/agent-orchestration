@@ -1,0 +1,57 @@
+# Publishes the daemon image to GHCR on version tags (cli-design.md §9).
+#
+# cb (claudebox CLI) ships no prebuilt linux/arm64 binary, so CI builds it
+# here from a PINNED ref of the public kentra-io/claudebox repo (bump
+# deliberately, like the conductor fork pin — ADR-0001 spirit). Pushing uses
+# the workflow's own GITHUB_TOKEN (packages: write) — no PAT or secret needed.
+name: publish-daemon
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CLAUDEBOX_REF: eac20a6bec3a2c53c93d4094556581eced62d8c0
+  IMAGE: ghcr.io/kentra-io/agent-orchestration-daemon
+
+jobs:
+  build-push:
+    # Native arm64 runner: the Dockerfile is aarch64-pinned (static docker +
+    # gh downloads), so no QEMU/buildx cross-build is needed.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: kentra-io/claudebox
+          ref: ${{ env.CLAUDEBOX_REF }}
+          path: claudebox-src
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: claudebox-src/go.mod
+
+      - name: Build cb (linux/arm64)
+        run: |
+          mkdir -p bin
+          cd claudebox-src
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o ../bin/cb .
+          file ../bin/cb
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          docker build -f container/daemon/Dockerfile \
+            -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"

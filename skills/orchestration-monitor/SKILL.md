@@ -9,12 +9,15 @@ description: Monitor agent-orchestration runs (launched via the orchestrator dae
 
 | Question | Surface |
 |---|---|
-| What is happening RIGHT NOW (turn-by-turn)? | The run's Conductor dashboard — URL from `orchestration runs` (one per live run; dies with the run — that is normal) |
-| What state is each run in (all projects)? | `orchestration runs` — or the index page at the daemon URL (default `http://localhost:8765`, from a box: `http://host.docker.internal:8765`) |
-| Deep status / why did it die? | `orchestration status <change-id>` — JSON with derived state, classified cause, and remedy |
+| What is happening RIGHT NOW (turn-by-turn)? | The run's Conductor dashboard — URL from `orch runs` (one per live run; dies with the run — that is normal) |
+| What state is each run in (all projects)? | `orch runs` — or the index page at the daemon URL (default `http://localhost:8765`, from a box: `http://host.docker.internal:8765`) |
+| Deep status / why did it die? | `orch status <change-id>` — JSON with derived state, classified cause, and remedy |
+| Is the daemon itself up? | `orch daemon status` (container state + `/runs` health); `orch daemon logs -f` for the daemon's own log tail |
 
-`orchestration runs`/`status` work even when the daemon is down (they fall
-back to reading `~/.agent-orchestration/runs/` directly).
+`orch runs`/`status` work even when the daemon is down (they fall
+back to reading `~/.agent-orchestration/runs/` directly). `orchestration` is
+still registered as an alias for every subcommand (`orchestration runs`,
+`orchestration status <change-id>`, ...).
 
 ## Reading states
 
@@ -26,10 +29,10 @@ back to reading `~/.agent-orchestration/runs/` directly).
   worktree, then resume.
 - `dead: api-transient` — provider blip killed the run. Remedy: resume.
 - `dead: unknown` — the run died with an unrecognized error; the classified
-  cause was not one of the known kinds. Read `orchestration status <change-id>`
+  cause was not one of the known kinds. Read `orch status <change-id>`
   for the raw detail tail, then decide (often a resume is safe).
 - `dead: unreconciled` — process gone, exit never observed; the daemon's next
-  reconcile pass (or any `orchestration runs` call) classifies it.
+  reconcile pass (or any `orch runs` call) classifies it.
 
 ## Sharp edges (learned the hard way — issue #7)
 

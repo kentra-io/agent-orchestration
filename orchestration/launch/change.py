@@ -53,7 +53,7 @@ Input JSON:
         "cb_run_timeout": number      # default 120 (seconds)
       },
       "conductor": {
-        "workflow": str,               # required, a workflow YAML path (relative to `repo` or abs)
+        "workflow": str,               # optional, default = module's workflows/execute-change.yaml
         "provider": str | null,        # optional --provider override ("stub" for the hermetic tier)
         "inputs": {str: str, ...},     # optional extra --input key=value pairs
         "plan_fixture_path": str,      # optional -- bypass `lifecycle apply`, use this fixture
@@ -475,11 +475,11 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
     repo_path = Path(repo)
 
     conductor_cfg = payload.get("conductor") or {}
-    workflow = conductor_cfg.get("workflow")
-    if not workflow or not isinstance(workflow, str):
-        raise ChangeLaunchError(
-            "'conductor.workflow' (non-empty string, path to a workflow YAML) is required"
-        )
+    workflow = conductor_cfg.get("workflow") or str(
+        MODULE_ROOT / "workflows" / "execute-change.yaml"
+    )
+    if not isinstance(workflow, str):
+        raise ChangeLaunchError("'conductor.workflow' must be a string path to a workflow YAML")
     workflow_path = Path(workflow)
     if not workflow_path.is_absolute():
         workflow_path = repo_path / workflow_path
@@ -524,6 +524,8 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         box=box_report.get("name"),
         tmpdir=str(tmpdir),
         issue=payload.get("issue"),
+        provider=conductor_cfg.get("provider"),
+        conductor_env=conductor_cfg.get("env") or {},
     )
     obs_registry.write_entry(registry_entry)
 
@@ -567,6 +569,8 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         # daemon (not bg_runner) owns the process, so only the env toggle is set.
         env["CONDUCTOR_WEB_BG"] = "1"
 
+    web_port = int(conductor_cfg.get("web_port", 0))
+
     report: dict[str, Any] = {
         "worktree": str(worktree),
         "branch": branch,
@@ -582,6 +586,7 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         "stdout_path": None,
         "stderr_path": None,
         "registry_path": str(obs_registry.entry_path(registry_entry["repo_slug"], change_id)),
+        "dashboard_url": f"http://localhost:{web_port}" if web_port else None,
         "log_legend": {
             "conductor.stdout.log": "final JSON result only (empty until the run finishes)",
             "conductor.stderr.log": "live progress UI (Rich panels) — this is the healthy channel",
@@ -612,7 +617,6 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         if proc_holder is not None:
             proc_holder["proc"] = proc
 
-    web_port = int(conductor_cfg.get("web_port", 0))
     obs_registry.append_incarnation(
         registry_entry["repo_slug"],
         change_id,

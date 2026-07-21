@@ -37,6 +37,27 @@ one; the loop itself lands over the following milestones.** See
 and [`implementation-plan.md`](./implementation-plan.md) for the milestone
 plan and locked decisions.
 
+## Install the CLI
+
+```bash
+uv tool install git+https://github.com/kentra-io/agent-orchestration
+orch daemon start           # pulls the public GHCR daemon image on first run
+```
+
+## Quickstart
+
+```bash
+orch launch <change-id>            # production: box + real spec-lifecycle plan
+orch launch demo --stub            # hermetic demo (stub provider, no box)
+orch runs                          # all runs, all projects
+orch status <change-id>            # folded JSON: derived state, classified cause, remedy
+orch resume <change-id>            # after a pause/death — never re-runs completed milestones
+```
+
+Developing on a checkout? `make daemon-image && make daemon-run` stays the
+build-from-source path; `orch daemon start --image agent-orchestration-daemon`
+runs your local build.
+
 ## Shape
 
 - Python 3.12+, managed with [`uv`](https://docs.astral.sh/uv/); the sole
