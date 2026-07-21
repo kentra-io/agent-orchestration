@@ -41,8 +41,7 @@ plan and locked decisions.
 
 ```bash
 uv tool install git+https://github.com/kentra-io/agent-orchestration
-docker login ghcr.io        # the daemon image is a private GHCR package
-orch daemon start
+orch daemon start           # pulls the public GHCR daemon image on first run
 ```
 
 ## Quickstart

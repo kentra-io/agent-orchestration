@@ -1,9 +1,9 @@
-# Publishes the daemon image to private GHCR on version tags (cli-design.md §9).
+# Publishes the daemon image to GHCR on version tags (cli-design.md §9).
 #
-# cb (claudebox CLI) is a PRIVATE repo: the binary cannot be pulled at image
-# runtime, so CI builds it here from a PINNED ref (bump deliberately, like the
-# conductor fork pin — ADR-0001 spirit) using the CLAUDEBOX_REPO_TOKEN secret
-# (fine-grained PAT, contents:read on kentra-io/claudebox — one-time setup).
+# cb (claudebox CLI) ships no prebuilt linux/arm64 binary, so CI builds it
+# here from a PINNED ref of the public kentra-io/claudebox repo (bump
+# deliberately, like the conductor fork pin — ADR-0001 spirit). Pushing uses
+# the workflow's own GITHUB_TOKEN (packages: write) — no PAT or secret needed.
 name: publish-daemon
 
 on:
@@ -29,7 +29,6 @@ jobs:
         with:
           repository: kentra-io/claudebox
           ref: ${{ env.CLAUDEBOX_REF }}
-          token: ${{ secrets.CLAUDEBOX_REPO_TOKEN }}
           path: claudebox-src
 
       - uses: actions/setup-go@v5

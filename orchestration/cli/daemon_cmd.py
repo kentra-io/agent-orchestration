@@ -95,8 +95,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         if pull.returncode != 0:
             print(pull.stderr.strip(), file=sys.stderr)
             print(
-                f"could not pull {image} — the GHCR package is private; "
-                "run `docker login ghcr.io` with a token that has read:packages",
+                f"could not pull {image} — if the package is private or you are "
+                "rate-limited, run `docker login ghcr.io` with a token that has "
+                "read:packages",
                 file=sys.stderr,
             )
             return 1
