@@ -9,22 +9,22 @@ per the claudebox config.yaml pattern).
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from typing import Any
 
+from orchestration.cli import config as cli_config
 from orchestration.obs import registry
 from orchestration.obs.status import collect, derive_state
 
 
 def daemon_url() -> str:
-    return os.environ.get("ORCHESTRATION_DAEMON_URL", "http://127.0.0.1:8765")
+    return cli_config.resolve_url()
 
 
 def _request(method: str, path: str, payload: dict | None = None) -> Any:
     req = urllib.request.Request(daemon_url() + path, method=method)
-    token = os.environ.get("ORCHESTRATION_DAEMON_TOKEN")
+    token = cli_config.resolve_token()
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     data = None
