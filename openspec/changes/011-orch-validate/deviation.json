@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-07-21T14:09:06Z",
+  "constitutionHash": "sha256:f8852e01039ca3e88165f40da95c8a4352ced393ff4d29c009bf7a64654b902a",
+  "plan": "openspec/changes/011-orch-validate/tasks.md",
+  "deviations": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  }
+}

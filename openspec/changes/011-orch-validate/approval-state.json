@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "011-orch-validate",
+  "issue": "kentra-io/agent-orchestration#11",
+  "gates": [
+    {
+      "stage": "refine",
+      "status": "approved",
+      "designSkipped": true,
+      "artifacts": {
+        "proposal.md": "sha256:0e67a84ad3ac5ff2ed6814ed07aa7b8f71ce40b32e58057d1cd5d1556514c79e",
+        "specs/cli-validate/spec.md": "sha256:a72693361e38ada7609da617eb8e44a83485617f1596f1c3d568dbf54fb32a48"
+      },
+      "constitutionHash": "sha256:f8852e01039ca3e88165f40da95c8a4352ced393ff4d29c009bf7a64654b902a",
+      "deviationConstitutionHash": null,
+      "deviationRef": null,
+      "approvedBy": "jony",
+      "approvedAt": "2026-07-21T14:01:05Z",
+      "notes": ""
+    },
+    {
+      "stage": "refine",
+      "status": "approved",
+      "designSkipped": true,
+      "artifacts": {
+        "proposal.md": "sha256:0e67a84ad3ac5ff2ed6814ed07aa7b8f71ce40b32e58057d1cd5d1556514c79e",
+        "specs/cli-validate/spec.md": "sha256:a72693361e38ada7609da617eb8e44a83485617f1596f1c3d568dbf54fb32a48"
+      },
+      "constitutionHash": "sha256:f8852e01039ca3e88165f40da95c8a4352ced393ff4d29c009bf7a64654b902a",
+      "deviationConstitutionHash": null,
+      "deviationRef": null,
+      "approvedBy": "jony",
+      "approvedAt": "2026-07-21T14:08:41Z",
+      "notes": ""
+    },
+    {
+      "stage": "plan",
+      "status": "approved",
+      "designSkipped": false,
+      "artifacts": {
+        "tasks.md": "sha256:910fc8f52ac9e2d30ca05c397ffcdf54037533bd605f504d3879e9ad6d9145b7"
+      },
+      "constitutionHash": "sha256:f8852e01039ca3e88165f40da95c8a4352ced393ff4d29c009bf7a64654b902a",
+      "deviationConstitutionHash": "sha256:f8852e01039ca3e88165f40da95c8a4352ced393ff4d29c009bf7a64654b902a",
+      "deviationRef": "deviation.json",
+      "approvedBy": "jony",
+      "approvedAt": "2026-07-21T14:09:12Z",
+      "notes": ""
+    }
+  ]
+}
