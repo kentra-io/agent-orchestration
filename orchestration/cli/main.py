@@ -8,10 +8,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from orchestration import client
-from orchestration.cli import daemon_cmd
+from orchestration.cli import daemon_cmd, launch_cmd
 
 EXIT_OK, EXIT_USER, EXIT_ENV = 0, 1, 2
 
@@ -35,29 +34,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_launch(args: argparse.Namespace) -> int:
-    # M1: raw-payload escape hatch only; the change-id path lands in M3.
-    if args.payload is None:
-        print(
-            "a --payload is required (change-id launches land in a later milestone)",
-            file=sys.stderr,
-        )
-        return EXIT_USER
-    raw = args.payload
-    if raw == "-":
-        raw = sys.stdin.read()
-    elif Path(raw).is_file():
-        raw = Path(raw).read_text()
-    payload = json.loads(raw)
-    if args.direct:
-        from orchestration.launch.change import launch
-
-        print(json.dumps(launch(payload), indent=2, sort_keys=True))
-        return EXIT_OK
-    print(json.dumps(client.post_launch(payload), indent=2, sort_keys=True))
-    return EXIT_OK
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="orch", description="agent-orchestration CLI (docs/cli-design.md)"
@@ -71,14 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("change_id")
     p_status.set_defaults(func=cmd_status)
 
-    p_launch = sub.add_parser("launch", help="launch a change via the daemon")
-    p_launch.add_argument("--payload", help="raw payload: JSON string, file path, or - for stdin")
+    p_launch = sub.add_parser("launch", help="launch a change via the daemon (design §7)")
+    p_launch.add_argument(
+        "--payload", help="raw payload escape hatch: JSON string, file path, or - for stdin"
+    )
     p_launch.add_argument(
         "--direct",
         action="store_true",
-        help="bypass the daemon: spawn in-process (reconciled later)",
+        help="with --payload: bypass the daemon, spawn in-process",
     )
-    p_launch.set_defaults(func=cmd_launch)
+    launch_cmd.register_launch_args(p_launch)
 
     daemon_cmd.register(sub)
 

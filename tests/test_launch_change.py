@@ -439,6 +439,55 @@ class TestResolvePlanRealLifecycleApply:
 # ---------------------------------------------------------------------------
 
 
+class TestReportDefaults:
+    def test_report_carries_dashboard_url_and_default_workflow(self, tmp_path: Path) -> None:
+        import json as _json
+        import subprocess as _sp
+
+        from orchestration.launch.change import MODULE_ROOT, launch
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _sp.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "f").write_text("x")
+        _sp.run(["git", "-C", str(repo), "add", "."], check=True)
+        _sp.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-qm",
+                "init",
+            ],
+            check=True,
+        )
+        fixture = tmp_path / "plan.json"
+        fixture.write_text(_json.dumps({"milestones": [{"id": 1, "title": "t"}]}))
+
+        report = launch(
+            {
+                "repo": str(repo),
+                "change_id": "1-a",
+                "dry_run": True,
+                "conductor": {
+                    "web": True,
+                    "web_port": 42007,
+                    "plan_fixture_path": str(fixture),
+                },
+            }
+        )
+        assert report["dashboard_url"] == "http://localhost:42007"
+        run_idx = report["conductor_argv"].index("run")
+        assert report["conductor_argv"][run_idx + 1] == str(
+            MODULE_ROOT / "workflows" / "execute-change.yaml"
+        )
+
+
 class TestMainCLI:
     def test_main_emits_json_and_exits_zero_on_a_dry_run(self, tmp_path: Path, capsys) -> None:
         config = _base_config(tmp_path, "c-cli", dry_run=True)
