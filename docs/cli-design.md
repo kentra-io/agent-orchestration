@@ -1,9 +1,9 @@
 # CLI design — `orch`
 
-Status: **approved design, pre-implementation** · 2026-07-21
+Status: **implemented (cli-core)** · 2026-07-21
 Builds on: [`observability-design.md`](./observability-design.md) (daemon, registry,
 supervision — all shipped in the observability-core change, PR #8).
-Implementation plan: `docs/plans/` (written after this spec is approved).
+Implementation plan: [`docs/plans/2026-07-21-cli-core.md`](./plans/2026-07-21-cli-core.md).
 
 ## 1. Problem & goals
 
