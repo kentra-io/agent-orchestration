@@ -91,6 +91,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,8 @@ from orchestration.launch.checkpoint_env import (
     persistent_checkpoint_env,
     persistent_checkpoint_subprocess_env,
 )
+from orchestration.obs import registry as obs_registry
+from orchestration.obs.classify import classify
 from orchestration.resume.plan import (
     PlanReadError,
     load_milestones,
@@ -319,6 +322,42 @@ def start_box(
     return names[0]
 
 
+def health_probe(
+    box: str,
+    docker_bin: str = "docker",
+    timeout: float = 60.0,
+    raise_on_fail: bool = False,
+) -> dict[str, Any]:
+    """`docker exec <box> claude -p OK` before spawning conductor.
+
+    Fails loud-and-early with a classified cause (design §5.1) instead of the
+    run dying 3s into the first agent turn with a masked error.
+    """
+    try:
+        proc = subprocess.run(
+            [docker_bin, "exec", box, "claude", "-p", "OK"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        verdict = classify(proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:], None)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        verdict = classify(1, "", f"probe could not run: {exc}", None)
+    report = {
+        "ok": verdict.kind == "success",
+        "classified": verdict.kind,
+        "remedy": verdict.remedy,
+        "detail": verdict.detail[-2000:],
+    }
+    if raise_on_fail and not report["ok"]:
+        raise ChangeLaunchError(
+            f"box health probe failed [{report['classified']}]: {report['detail'][:300]}"
+            + (f" — remedy: {report['remedy']}" if report["remedy"] else "")
+        )
+    return report
+
+
 # ---------------------------------------------------------------------------
 # Step 3: plan resolution (reuses orchestration.resume.plan -- M7)
 # ---------------------------------------------------------------------------
@@ -377,6 +416,8 @@ def build_conductor_argv(
     silent: bool,
     provider: str | None,
     inputs: dict[str, str],
+    web: bool = False,
+    web_port: int = 0,
 ) -> list[str]:
     argv = [conductor_bin]
     if silent:
@@ -384,6 +425,8 @@ def build_conductor_argv(
     argv += ["run", workflow]
     if provider:
         argv += ["--provider", provider]
+    if web:
+        argv += ["--web", "--web-port", str(web_port)]
     for key, value in inputs.items():
         argv += ["--input", f"{key}={value}"]
     return argv
@@ -406,11 +449,22 @@ def _find_events_path(tmp_dir: Path, timeout: float = 2.0) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def launch(payload: dict[str, Any]) -> dict[str, Any]:
+def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run the full M8 launch recipe for one change; return the report JSON.
 
     See the module docstring for the input/output shapes and the exit-code
     convention `main` applies on top of this.
+
+    `proc_holder`: optional out-param seam for a caller (e.g. a background
+    daemon) that needs the live `subprocess.Popen` handle -- if given, the
+    conductor child process is stashed at `proc_holder["proc"]` the moment
+    it is spawned (dry runs never populate it).
+
+    Registry (`orchestration.obs.registry`): every launch (including
+    `dry_run`) writes a facts-only registry entry keyed by `repo_slug` +
+    `change_id`; a spawned conductor child additionally appends an
+    incarnation (pid/web_port/dashboard_url) and, once a synchronous
+    (`wait: true`) launch's child exits, records its `exit_code`.
     """
     repo = payload.get("repo")
     change_id = payload.get("change_id")
@@ -452,9 +506,26 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
                 docker_bin=box_cfg.get("docker_bin", "docker"),
                 timeout=float(box_cfg.get("cb_run_timeout", 120.0)),
             )
+    if box_enabled and box_report.get("name") and bool(box_cfg.get("health_probe", True)):
+        box_report["health_probe"] = health_probe(
+            box_report["name"],
+            docker_bin=box_cfg.get("docker_bin", "docker"),
+            raise_on_fail=True,
+        )
 
     tmpdir = Path(conductor_cfg.get("tmpdir") or (worktree / ".conductor-tmp"))
     tmpdir.mkdir(parents=True, exist_ok=True)
+
+    registry_entry = obs_registry.new_entry(
+        repo=str(repo_path),
+        change_id=change_id,
+        worktree=str(worktree),
+        branch=branch,
+        box=box_report.get("name"),
+        tmpdir=str(tmpdir),
+        issue=payload.get("issue"),
+    )
+    obs_registry.write_entry(registry_entry)
 
     plan_fixture_path = resolve_plan(
         worktree,
@@ -477,6 +548,8 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
         silent=bool(conductor_cfg.get("silent", True)),
         provider=conductor_cfg.get("provider"),
         inputs=inputs,
+        web=bool(conductor_cfg.get("web", False)),
+        web_port=int(conductor_cfg.get("web_port", 0)),
     )
 
     env = persistent_checkpoint_subprocess_env(tmpdir / "checkpoints")
@@ -489,6 +562,10 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
     # silently collapse two concurrent changes onto one shared checkpoint/
     # event dir (review finding 2026-07-09; P4/ADR-0002).
     env.update(persistent_checkpoint_env(tmpdir / "checkpoints"))
+    if bool(conductor_cfg.get("web", False)):
+        # bg-mode = auto-shutdown after workflow end + client disconnect; the
+        # daemon (not bg_runner) owns the process, so only the env toggle is set.
+        env["CONDUCTOR_WEB_BG"] = "1"
 
     report: dict[str, Any] = {
         "worktree": str(worktree),
@@ -504,6 +581,11 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
         "events_path": None,
         "stdout_path": None,
         "stderr_path": None,
+        "registry_path": str(obs_registry.entry_path(registry_entry["repo_slug"], change_id)),
+        "log_legend": {
+            "conductor.stdout.log": "final JSON result only (empty until the run finishes)",
+            "conductor.stderr.log": "live progress UI (Rich panels) — this is the healthy channel",
+        },
     }
 
     if dry_run:
@@ -527,12 +609,31 @@ def launch(payload: dict[str, Any]) -> dict[str, Any]:
             stdin=subprocess.DEVNULL,
             text=True,
         )
+        if proc_holder is not None:
+            proc_holder["proc"] = proc
+
+    web_port = int(conductor_cfg.get("web_port", 0))
+    obs_registry.append_incarnation(
+        registry_entry["repo_slug"],
+        change_id,
+        {
+            "pid": proc.pid,
+            "started_at": datetime.now(UTC).isoformat(),
+            "web_port": web_port or None,
+            "dashboard_url": f"http://localhost:{web_port}" if web_port else None,
+            "exit_code": None,
+            "classified": None,
+        },
+    )
 
     if wait:
         returncode = proc.wait()
         report["returncode"] = returncode
         report["pid"] = proc.pid
         report["events_path"] = _find_events_path(tmpdir)
+        obs_registry.update_incarnation(
+            registry_entry["repo_slug"], change_id, exit_code=returncode
+        )
     else:
         report["pid"] = proc.pid
         report["events_path"] = _find_events_path(tmpdir, timeout=0.5)
