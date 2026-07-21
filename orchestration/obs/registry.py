@@ -39,6 +39,8 @@ def new_entry(
     box: str | None,
     tmpdir: str,
     issue: int | None = None,
+    provider: str | None = None,
+    conductor_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "repo_slug": repo_slug(repo),
@@ -49,6 +51,8 @@ def new_entry(
         "box": box,
         "tmpdir": tmpdir,
         "issue": issue,
+        "provider": provider,
+        "conductor_env": conductor_env or {},
         "created_at": datetime.now(UTC).isoformat(),
         "incarnations": [],
     }

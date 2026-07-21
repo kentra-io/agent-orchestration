@@ -524,6 +524,8 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         box=box_report.get("name"),
         tmpdir=str(tmpdir),
         issue=payload.get("issue"),
+        provider=conductor_cfg.get("provider"),
+        conductor_env=conductor_cfg.get("env") or {},
     )
     obs_registry.write_entry(registry_entry)
 

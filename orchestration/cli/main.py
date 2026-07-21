@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --payload: bypass the daemon, spawn in-process",
     )
     launch_cmd.register_launch_args(p_launch)
+    launch_cmd.register_resume(sub)
 
     daemon_cmd.register(sub)
 

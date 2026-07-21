@@ -170,6 +170,21 @@ def cmd_launch(args: argparse.Namespace) -> int:
     return _post(payload, args.no_open, client.post_launch)
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    repo = _resolve_repo(args)
+    if repo is None:
+        return 1
+    return _post({"repo": repo, "change_id": args.change_id}, args.no_open, client.post_resume)
+
+
+def register_resume(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("resume", help="resume a paused/dead change via the daemon (design §8)")
+    p.add_argument("change_id")
+    p.add_argument("--repo", help="target repo (default: git toplevel of cwd)")
+    p.add_argument("--no-open", action="store_true", help="don't open the dashboard")
+    p.set_defaults(func=cmd_resume)
+
+
 def register_launch_args(p_launch: argparse.ArgumentParser) -> None:
     p_launch.add_argument("change_id", nargs="?", help="spec-lifecycle change id")
     p_launch.add_argument("--repo", help="target repo (default: git toplevel of cwd)")

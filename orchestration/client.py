@@ -62,3 +62,7 @@ def get_status(change_id: str) -> dict[str, Any] | None:
 
 def post_launch(payload: dict[str, Any]) -> dict[str, Any]:
     return _request("POST", "/launch", payload)
+
+
+def post_resume(payload: dict[str, Any]) -> dict[str, Any]:
+    return _request("POST", "/resume", payload)

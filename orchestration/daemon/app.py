@@ -1,7 +1,9 @@
 """The daemon app: control plane + index (design §3.1, §5.2).
 
-POST /resume is deliberately 501 in observability-core: resume stays
-CLI-direct until the github-mirror change (design §10, resolved).
+POST /resume is a real, token-gated sibling of /launch (design §8):
+re-derives remaining milestones from the current plan, resumes in place or
+starts a fresh run over the remaining list, allocates a dashboard port,
+adopts the child, and appends a new incarnation.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 from orchestration.daemon.ports import PortAllocator, parse_range
+from orchestration.daemon.resume import ResumeError
+from orchestration.daemon.resume import resume as _resume_fn
 from orchestration.daemon.supervise import Supervisor
 from orchestration.launch.change import launch as _launch_fn
 from orchestration.obs import registry
@@ -81,11 +85,32 @@ def create_app(supervisor: Supervisor, token: str | None = None) -> FastAPI:
         return {"report": report}
 
     @app.post("/resume")
-    async def resume() -> None:
-        raise HTTPException(
-            status_code=501,
-            detail="resume stays CLI-direct in observability-core (see design §10)",
-        )
+    async def resume_run(request: Request) -> dict[str, Any]:
+        _check_token(request)
+        payload = await request.json()
+        repo, change_id = payload.get("repo"), payload.get("change_id")
+        if not repo or not change_id:
+            raise HTTPException(status_code=422, detail="repo and change_id are required")
+        slug = registry.repo_slug(repo)
+        entry = registry.load_entry(slug, change_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404, detail=f"nothing to resume for {slug}--{change_id}"
+            )
+        derived = derive_state(entry, collect(entry))
+        if derived["state"] == "running":
+            raise HTTPException(status_code=409, detail="run is still alive — nothing to resume")
+        web_port = allocator.allocate()
+        holder: dict[str, Any] = {}
+        try:
+            report = await run_in_threadpool(
+                _resume_fn, entry, web_port=web_port, proc_holder=holder
+            )
+        except ResumeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if holder.get("proc") is not None:
+            supervisor.adopt(slug, change_id, holder["proc"])
+        return {"report": report}
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
