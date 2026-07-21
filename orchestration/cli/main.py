@@ -10,7 +10,7 @@ import json
 import sys
 
 from orchestration import client
-from orchestration.cli import daemon_cmd, launch_cmd
+from orchestration.cli import daemon_cmd, launch_cmd, validate_cmd
 
 EXIT_OK, EXIT_USER, EXIT_ENV = 0, 1, 2
 
@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     launch_cmd.register_launch_args(p_launch)
     launch_cmd.register_resume(sub)
+
+    validate_cmd.register(sub)
 
     daemon_cmd.register(sub)
 
