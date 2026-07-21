@@ -1,0 +1,7 @@
+.git
+.venv
+.worktrees
+.conductor-tmp
+.orchestration-stub
+claudebox-src
+dist
