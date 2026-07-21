@@ -13,6 +13,19 @@ description: Start or resume an agent-orchestration execute-change run from any 
   http://host.docker.internal:8765` + `ORCHESTRATION_DAEMON_TOKEN` (env-injected
   via the claudebox `config.yaml env:` pattern) — env always wins over daemon.json.
 
+## Pre-launch check
+
+Before `orch launch`, run the daemon-free plan check from inside the target repo:
+
+```bash
+orch validate <change-id> [--repo /path/to/project]
+```
+
+It prints one line per milestone (id, title, contract present or not) plus a
+total and exits 0 when the plan is valid; exit 1 = unknown change or a plan-stage
+validation failure (it lists the available change folders), exit 2 = `lifecycle`
+is not on PATH (install it first). No daemon or docker call — safe to run any time.
+
 ## Launch
 
 ```bash

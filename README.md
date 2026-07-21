@@ -47,6 +47,7 @@ orch daemon start           # pulls the public GHCR daemon image on first run
 ## Quickstart
 
 ```bash
+orch validate <change-id>          # daemon-free plan check: one line per milestone, then launch
 orch launch <change-id>            # production: box + real spec-lifecycle plan
 orch launch demo --stub            # hermetic demo (stub provider, no box)
 orch runs                          # all runs, all projects

@@ -63,6 +63,7 @@ orch daemon stop
 orch daemon status
 orch daemon logs [-f]
 
+orch validate <change-id> [--repo PATH]   # daemon-free plan check; no docker call
 orch launch <change-id> [--repo PATH] [--stub] [--milestones-file F]
                         [--issue N] [--branch B] [--no-open]
 orch launch --payload FILE|-|JSON [--direct]      # raw escape hatch, unchanged
@@ -71,6 +72,18 @@ orch resume <change-id> [--repo PATH] [--no-open]
 orch runs                    # existing table
 orch status <change-id>      # existing folded JSON
 ```
+
+`orch validate <change-id> [--repo PATH]` is a standalone, daemon-free plan
+check: it resolves the repo like the launcher (git toplevel of cwd, overridable
+with `--repo`), loads the change's milestones through the same `lifecycle apply`
+surface the launcher's pre-flight trusts, and prints one summary line per
+milestone — id, title, and whether a structured `contract` block is present —
+followed by a milestone total. No daemon and no docker call. Exit codes follow
+§10's 0/1/2 policy: **0** plan valid; **1** the change is unknown or its
+`tasks.md` fails plan-stage validation (error to stderr plus the available
+non-archive change folders); **2** `lifecycle` is not on PATH (an install hint
+to stderr — distinct from the launcher's warn-and-proceed, because validation is
+this command's entire job).
 
 ## 5. Config file & credential precedence
 
@@ -180,8 +193,10 @@ Every failure mode carries a one-line remedy:
 | 401 from daemon | token mismatch — rerun `orch daemon start` / check daemon.json | 1 |
 | GHCR pull denied | `docker login ghcr.io` hint | 1 |
 | unknown change id | list of `openspec/changes/` entries | 1 |
+| invalid plan (validate) | plan-stage error + available change folders | 1 |
 | nothing to resume / already running | say which | 1 |
 | docker absent/unreachable | install/start pointer | 2 |
+| `lifecycle` not on PATH (validate) | install hint | 2 |
 
 Exit codes: 0 ok · 1 user-fixable · 2 environment broken.
 
