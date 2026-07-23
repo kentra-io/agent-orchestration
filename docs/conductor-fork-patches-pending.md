@@ -1,13 +1,17 @@
-# Pending Conductor-fork patches (to upstream + pin-bump)
+# Conductor-fork patch record (all upstreamed)
 
 Per constitution ADR-0001, provider fixes belong in the `kentra-io/conductor`
-fork patch-set (currently pinned `rev = 5461008b7d5adf0beae30f9459e4b088c9d4d7f9`
-in `pyproject.toml` / `uv.lock`), not as edits to the installed `.venv`.
+fork patch-set (branch `kentra-patches`), not as edits to the installed `.venv`.
 
-Fixes below were applied to the local `.venv` copy to unblock a live run and
-**must be upstreamed into the fork, then the pin bumped** (and `uv sync` on host).
+**Status 2026-07-23: nothing pending.** Both fixes below are upstreamed in
+fork commit `ab0ff4c` (branch `kentra-patches`) with regression tests, and the
+pin in `pyproject.toml` / `uv.lock` is bumped to it. The related auth-expiry
+*masking* fix (surface the stdout noise tail in `ProviderError` so "OAuth
+session expired" is visible — `tasks/orchestration-box-auth-expiry.md` in the
+harness repo) had already shipped in fork commit `088e35c`. This file stays as
+the patch record + upstream procedure for future fixes.
 
-## 1. ClaudeboxProvider StreamReader 64 KiB line-limit (workflow-killer)
+## 1. ClaudeboxProvider StreamReader 64 KiB line-limit (workflow-killer) — UPSTREAMED `ab0ff4c`
 
 **File:** `conductor/providers/claudebox.py`
 
@@ -35,9 +39,16 @@ split on newlines manually, or catch `ValueError` from `readline()` and
 `readuntil()`-drain. The constant cap is sufficient for realistic outputs; note
 it as a known bound.
 
-## 2. ClaudeboxProvider transient-API-error retry gap (workflow-killer)
+## 2. ClaudeboxProvider transient-API-error retry gap (workflow-killer) — UPSTREAMED `ab0ff4c`
 
 **File:** `conductor/providers/claudebox.py`
+
+**Upstreaming deviation (deliberate):** the classification `diag` joins
+stderr + the retained stdout noise-line tail + `result_error_message` —
+CLI-authored signals only. Agent-generated content (`content_parts`,
+`result_text`) is deliberately EXCLUDED, unlike the original `.venv` stopgap
+sketch: keyword-matching agent prose ("connection", "timed out", ...) would
+misclassify genuine failures as retryable.
 
 **Symptom:** live run dies with
 `API Error: Connection closed mid-response` →
