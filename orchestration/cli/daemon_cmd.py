@@ -111,6 +111,18 @@ def cmd_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_env(args: argparse.Namespace) -> int:
+    token = config.load_config().get("token")
+    if not token:
+        print(
+            f"no token in {config.config_path()} — run `orch daemon start` first",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"export ORCHESTRATION_DAEMON_TOKEN={token}")
+    return 0
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     proc = _run(["docker", "rm", "-f", CONTAINER])
     if proc.returncode != 0:
@@ -146,6 +158,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     p_start.add_argument("--image", help="image ref override (persisted)")
     p_start.add_argument("--code-root", help="host code root to mount (default ~/code)")
     p_start.set_defaults(func=cmd_start)
+    dsub.add_parser(
+        "env",
+        help='print an eval-able token export — `eval "$(orch daemon env)"` before `cb run` '
+        "so a consuming box's config.yaml ${ORCHESTRATION_DAEMON_TOKEN} interpolation resolves",
+    ).set_defaults(func=cmd_env)
     dsub.add_parser("stop", help="remove the daemon container").set_defaults(func=cmd_stop)
     dsub.add_parser("status", help="container + API health").set_defaults(func=cmd_status)
     p_logs = dsub.add_parser("logs", help="docker logs")

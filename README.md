@@ -59,6 +59,32 @@ Developing on a checkout? `make daemon-image && make daemon-run` stays the
 build-from-source path; `orch daemon start --image agent-orchestration-daemon`
 runs your local build.
 
+## Wiring a consuming project's boxes to the daemon
+
+The daemon is user-scoped (one per host; token minted into
+`~/.agent-orchestration/daemon.json` by `orch daemon start`). A project opts
+its boxes in — no secret in the file — by adding two lines to its
+`.claudebox/config.yaml`:
+
+```yaml
+env:
+  ORCHESTRATION_DAEMON_URL: http://host.docker.internal:8765
+  ORCHESTRATION_DAEMON_TOKEN: ${ORCHESTRATION_DAEMON_TOKEN}
+```
+
+Boxes launched **by the daemon** (production `orch launch`) resolve the
+`${...}` interpolation automatically — the daemon container carries the token.
+For an **interactively started** box, export it into your shell first:
+
+```bash
+eval "$(orch daemon env)"   # transient — nothing lands in your shell rc
+cb run
+```
+
+In-box sessions then reach `orch runs` / `orch status` through the daemon;
+without the opt-in, in-box calls can't reach it (the local-registry fallback
+is empty inside a box — the registry lives on the host).
+
 ## Shape
 
 - Python 3.12+, managed with [`uv`](https://docs.astral.sh/uv/); the sole
