@@ -539,10 +539,16 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
 
     inputs = dict(conductor_cfg.get("inputs") or {})
     inputs.setdefault("plan_fixture_path", str(plan_fixture_path))
+    inputs.setdefault("change_id", change_id)
     if box_enabled:
         inputs.setdefault("worktree", str(worktree))
         if box_report.get("name"):
             inputs.setdefault("box", box_report["name"])
+        # Production tier: persist every verified milestone as a commit
+        # (orchestration.launch.milestone_commit) -- the durability finish.
+        # The hermetic tier keeps the workflow default (dry-run) so stub
+        # runs never commit into a checkout.
+        inputs.setdefault("commit_dry_run", "false")
 
     argv = build_conductor_argv(
         conductor_bin=_conductor_bin(conductor_cfg.get("conductor_bin")),

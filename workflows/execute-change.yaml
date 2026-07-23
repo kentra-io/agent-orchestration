@@ -106,13 +106,23 @@ workflow:
       type: boolean
       required: false
       default: true
+    commit_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        Skip the real per-milestone `git commit` in milestone.yaml's
+        `commit` step (hermetic default). The launcher flips this to false
+        for the production (box) tier so every verified milestone is
+        persisted as a commit -- see `orchestration.launch.milestone_commit`.
     change_id:
       type: string
       required: false
       default: ""
       description: >-
         The spec-lifecycle change id, passed to the `archive_handoff` step
-        (M8). Only required when `archive_dry_run` is false -- a hermetic
+        (M8) and forwarded to milestone.yaml for the commit-message suffix.
+        Only required when `archive_dry_run` is false -- a hermetic
         run leaves this at the trivial default (`archive_handoff` never
         shells out to `lifecycle` while dry_run holds).
     healthcheck_command:
@@ -193,6 +203,17 @@ agents:
       attempt_threshold: "{{ workflow.input.attempt_threshold }}"
       gates_l1_command: "{{ workflow.input.gates_l1_command }}"
       notify_dry_run: "{{ workflow.input.notify_dry_run }}"
+      # Milestone-commit wiring (durability finish): change_id feeds the
+      # commit-message suffix, commit_dry_run gates the real git call (the
+      # launcher flips it false for the production tier), commit_paths
+      # confines `git add` to the milestone's declared contract.paths (the
+      # same set the diff gate enforces).
+      change_id: "{{ workflow.input.change_id }}"
+      commit_dry_run: "{{ workflow.input.commit_dry_run }}"
+      # dict-get access (not attribute access): a plan item without a
+      # `contract` key must fall back to [] rather than tripping
+      # StrictUndefined mid-render.
+      commit_paths: "{{ ((read_plan.output.milestones[cursor.output.index].get('contract') or {}).get('paths') or []) | tojson }}"
       # The cast agents that actually call the ClaudeboxProvider live in the
       # NESTED milestone.yaml, not at this root -- and a `type: workflow`
       # child's `workflow.input` is populated ONLY from this input_mapping

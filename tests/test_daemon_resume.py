@@ -105,3 +105,95 @@ def test_no_checkpoint_raises(monkeypatch, tmp_path):
         raise AssertionError("expected ResumeError")
     except dr.ResumeError as exc:
         assert "no checkpoint" in str(exc)
+
+
+# --- box auth/health pre-flight (harness tasks/orchestration-box-auth-expiry.md) ---
+
+
+def _probe_report(ok, classified="oauth-expired"):
+    return {
+        "ok": ok,
+        "classified": "success" if ok else classified,
+        "remedy": None if ok else "run `cb login` from the worktree, then resume",
+        "detail": "" if ok else "OAuth session expired and could not be refreshed",
+    }
+
+
+def test_box_preflight_ok_proceeds(monkeypatch, tmp_path):
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2]}))
+    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
+    monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(True))
+    entry = _entry(tmp_path, box="box-1")
+
+    report = dr.resume(entry, web_port=42013)
+    assert report["mode"] == "resume-in-place"
+    assert spawned["argv"]
+
+
+def test_box_preflight_heals_via_cb_login_then_proceeds(monkeypatch, tmp_path):
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2]}))
+    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
+
+    probes = iter([_probe_report(False), _probe_report(True)])
+    monkeypatch.setattr(dr, "health_probe", lambda box, **kw: next(probes))
+    logins = []
+
+    def fake_run(argv, **kwargs):
+        logins.append((argv, kwargs.get("cwd")))
+
+        class P:
+            returncode = 0
+            stdout = "Credentials provisioned into container"
+            stderr = ""
+
+        return P()
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    entry = _entry(tmp_path, box="box-1")
+
+    report = dr.resume(entry, web_port=42014)
+    assert report["mode"] == "resume-in-place"
+    assert logins and logins[0][0] == ["cb", "login"]
+    assert logins[0][1] == entry["worktree"]  # cb resolves the box from cwd
+    assert spawned["argv"]
+
+
+def test_box_preflight_still_failing_raises_with_classified_remedy(monkeypatch, tmp_path):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(False))
+
+    def fake_run(argv, **kwargs):
+        class P:
+            returncode = 1
+            stdout = ""
+            stderr = "host token also expired"
+
+        return P()
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    entry = _entry(tmp_path, box="box-1")
+    try:
+        dr.resume(entry, web_port=42015)
+        raise AssertionError("expected ResumeError")
+    except dr.ResumeError as exc:
+        msg = str(exc)
+        assert "oauth-expired" in msg
+        assert "cb login" in msg
+
+
+def test_no_box_skips_preflight(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        dr, "health_probe", lambda box, **kw: (_ for _ in ()).throw(AssertionError("probed"))
+    )
+    monkeypatch.setattr(dr, "find_latest_checkpoint_in", lambda tmpdir: None)
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    entry = _entry(tmp_path)
+    try:
+        dr.resume(entry, web_port=42016)
+        raise AssertionError("expected ResumeError")
+    except dr.ResumeError as exc:
+        assert "no checkpoint" in str(exc)

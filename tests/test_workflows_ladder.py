@@ -342,6 +342,7 @@ class TestGuidanceReachesNextAttempt:
         )
         started = _agent_names(events, "agent_started")
         # implementer(1) -> gates -> verifier(1, fail) -> counter -> orchestrator -> implementer(2)
+        # ... -> verifier(2, pass) -> commit (dry-run milestone commit on the pass path)
         assert started == [
             "implementer",
             "gates",
@@ -351,6 +352,7 @@ class TestGuidanceReachesNextAttempt:
             "implementer",
             "gates",
             "verifier",
+            "commit",
         ]
 
     def test_implementer_prompt_template_interpolates_orchestrator_guidance(self) -> None:

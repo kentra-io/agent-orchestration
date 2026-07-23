@@ -25,7 +25,12 @@ from typing import Any
 
 from conductor.engine.checkpoint import CheckpointManager
 
-from orchestration.launch.change import MODULE_ROOT, _conductor_bin, build_conductor_argv
+from orchestration.launch.change import (
+    MODULE_ROOT,
+    _conductor_bin,
+    build_conductor_argv,
+    health_probe,
+)
 from orchestration.launch.checkpoint_env import (
     persistent_checkpoint_env,
     persistent_checkpoint_subprocess_env,
@@ -43,6 +48,52 @@ from orchestration.resume.plan import (
 
 class ResumeError(ValueError):
     """Nothing resumable, or the resume recipe could not run."""
+
+
+def preflight_box_auth(
+    box: str,
+    worktree: str,
+    *,
+    cb_bin: str = "cb",
+    docker_bin: str = "docker",
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """Probe the box's `claude` auth BEFORE respawning conductor; heal once.
+
+    A box's injected OAuth credentials are time-boxed, and a resume typically
+    happens hours after launch (the 2026-07-15 incident: a ~19h human-gate gap
+    outlived the token, and the dead credentials surfaced only as
+    `claude subprocess exited with code 1` three seconds into the respawned
+    run — harness `tasks/orchestration-box-auth-expiry.md`). So: run the same
+    `health_probe` the launcher uses; on failure attempt ONE non-interactive
+    `cb login` from the worktree (`cb` resolves the target container from
+    cwd; stdin is /dev/null so an interactive OAuth fallback can never hang
+    the daemon), then re-probe. Returns the final probe report (callers
+    raise on `ok: False` with the classified cause + remedy).
+    """
+    report = health_probe(box, docker_bin=docker_bin)
+    if report["ok"]:
+        return report
+
+    login: dict[str, Any] = {"attempted": True, "ok": False, "detail": ""}
+    try:
+        proc = subprocess.run(
+            [cb_bin, "login"],
+            cwd=worktree,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        login["ok"] = proc.returncode == 0
+        login["detail"] = (proc.stderr.strip() or proc.stdout.strip())[-500:]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        login["detail"] = f"`cb login` could not run: {exc}"
+
+    report = health_probe(box, docker_bin=docker_bin)
+    report["login"] = login
+    return report
 
 
 def find_latest_checkpoint_in(tmpdir: str | Path) -> Path | None:
@@ -74,6 +125,16 @@ def resume(
     tmpdir = Path(entry["tmpdir"])
     worktree = entry["worktree"]
     change_id = entry["change_id"]
+
+    if entry.get("box"):
+        probe = preflight_box_auth(entry["box"], worktree)
+        if not probe["ok"]:
+            detail = str(probe.get("detail", ""))[:300]
+            remedy = probe.get("remedy") or "run `cb login` from the worktree, then resume"
+            raise ResumeError(
+                f"box auth/health pre-flight failed [{probe.get('classified')}]: "
+                f"{detail} — remedy: {remedy}"
+            )
 
     ckpt_path = find_latest_checkpoint_in(tmpdir)
     if ckpt_path is None:
