@@ -116,3 +116,18 @@ def test_start_pull_denied_hints_ghcr_login(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(dc, "_run", fake_run)
     assert dc.cmd_start(_ns()) == 1
     assert "docker login ghcr.io" in capsys.readouterr().err
+
+
+def test_env_prints_evalable_token_export(monkeypatch, tmp_path, capsys):
+    cfg_path = tmp_path / "daemon.json"
+    monkeypatch.setenv("ORCHESTRATION_CONFIG_PATH", str(cfg_path))
+    cfg_path.write_text(json.dumps({"token": "tok123"}))
+    assert dc.cmd_env(_ns()) == 0
+    assert capsys.readouterr().out == "export ORCHESTRATION_DAEMON_TOKEN=tok123\n"
+
+
+def test_env_exit1_before_first_start(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("ORCHESTRATION_CONFIG_PATH", str(tmp_path / "daemon.json"))
+    assert dc.cmd_env(_ns()) == 1
+    err = capsys.readouterr().err
+    assert "orch daemon start" in err

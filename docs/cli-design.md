@@ -62,6 +62,7 @@ orch daemon start [--image REF] [--code-root DIR]
 orch daemon stop
 orch daemon status
 orch daemon logs [-f]
+orch daemon env              # eval-able ORCHESTRATION_DAEMON_TOKEN export
 
 orch validate <change-id> [--repo PATH]           # daemon-free plan validation
 orch launch <change-id> [--repo PATH] [--stub] [--milestones-file F]
@@ -86,6 +87,18 @@ Client lookup precedence (in `orchestration/client.py`): env
 config.yaml env-injection pattern, unchanged) → `daemon.json` → current
 defaults. This removes the manual token dance on host: after one
 `orch daemon start`, every `orch` command authenticates from the file.
+
+Scoping (decided 2026-07-23): the **credential is user-scoped** (it guards a
+user-scoped daemon; token lives only in `daemon.json`), the **opt-in is
+project-scoped** — a consuming project's `.claudebox/config.yaml` declares
+`ORCHESTRATION_DAEMON_URL: http://host.docker.internal:8765` plus
+`ORCHESTRATION_DAEMON_TOKEN: ${ORCHESTRATION_DAEMON_TOKEN}` (committable, no
+literal secret). Daemon-launched boxes resolve the interpolation from the
+daemon container's env; interactive boxes get it transiently via
+`eval "$(orch daemon env)"` before `cb run` — nothing persists in shell rc
+files. Per-project tokens were considered and rejected for now: meaningful
+isolation would need token↔repo authz in the daemon; retrofittable if this
+ever goes multi-user (see README "Wiring a consuming project's boxes").
 
 ## 6. Daemon lifecycle
 
