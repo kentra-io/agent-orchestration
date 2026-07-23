@@ -63,6 +63,7 @@ orch daemon stop
 orch daemon status
 orch daemon logs [-f]
 
+orch validate <change-id> [--repo PATH]           # daemon-free plan validation
 orch launch <change-id> [--repo PATH] [--stub] [--milestones-file F]
                         [--issue N] [--branch B] [--no-open]
 orch launch --payload FILE|-|JSON [--direct]      # raw escape hatch, unchanged
@@ -133,6 +134,28 @@ targets remain the local-dev path (build-from-checkout).
 - No silent fallback: daemon down → exit 1, "run `orch daemon start`".
   `--direct` (in-process spawn, reconciled later) stays explicit-only.
 
+### 7a. `orch validate` — standalone plan validation
+
+`orch validate <change-id> [--repo PATH]` is a daemon-free, docker-free
+pre-launch check: it validates the change's plan through the same
+`lifecycle apply` surface the launcher's pre-flight trusts, but contacts no
+daemon and starts no run.
+
+- `repo` = `git rev-parse --show-toplevel` of cwd; `--repo` overrides — the same
+  resolution the launcher uses.
+- On success: one summary line per milestone — the milestone id, its title, and
+  whether a structured validation contract (```contract block) is present —
+  followed by a milestone total, and exit 0.
+- Unknown change id or a tasks.md that fails plan-stage validation: the
+  validation error goes to stderr, plus the available (non-archive)
+  `openspec/changes/` folders, and exits 1.
+- `lifecycle` missing from PATH: an actionable install hint to stderr and exit 2
+  (environment broken — distinct from the launcher's warn-and-proceed, because
+  validation is this command's entire job).
+
+Exit-code mapping is the §10 contract: 0 ok · 1 user-fixable · 2 environment
+broken.
+
 ## 8. Resume semantics
 
 Daemon `POST /resume` becomes real (observability-core shipped it as a
@@ -180,8 +203,10 @@ Every failure mode carries a one-line remedy:
 | 401 from daemon | token mismatch — rerun `orch daemon start` / check daemon.json | 1 |
 | GHCR pull denied | `docker login ghcr.io` hint | 1 |
 | unknown change id | list of `openspec/changes/` entries | 1 |
+| invalid plan (`orch validate`) | validation error + available change ids | 1 |
 | nothing to resume / already running | say which | 1 |
 | docker absent/unreachable | install/start pointer | 2 |
+| `lifecycle` absent from PATH (`orch validate`) | install hint | 2 |
 
 Exit codes: 0 ok · 1 user-fixable · 2 environment broken.
 
