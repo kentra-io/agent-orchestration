@@ -152,9 +152,7 @@ class TestErrors:
             commit({"worktree": "."})
 
     def test_non_repo_worktree_is_a_loud_error(self, tmp_path: Path) -> None:
-        verdict, code = commit(
-            {"worktree": str(tmp_path), "milestone_id": 1, "dry_run": False}
-        )
+        verdict, code = commit({"worktree": str(tmp_path), "milestone_id": 1, "dry_run": False})
         assert code == EXIT_ERROR
         assert verdict["status"] == "error"
         assert verdict["reason"]
@@ -172,9 +170,7 @@ class TestScriptEntry:
         assert out["status"] == "dry_run"
         assert out["message"] == "M5: t"
 
-    def test_main_input_error_exits_2_with_error_json(
-        self, capsys: pytest.CaptureFixture
-    ) -> None:
+    def test_main_input_error_exits_2_with_error_json(self, capsys: pytest.CaptureFixture) -> None:
         code = main([json.dumps({})])
         assert code == EXIT_ERROR
         out = json.loads(capsys.readouterr().out)

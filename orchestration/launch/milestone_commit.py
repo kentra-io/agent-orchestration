@@ -84,9 +84,7 @@ _FALLBACK_IDENT_EMAIL = "agent-orchestration@localhost"
 _GIT_TIMEOUT_SECONDS = 60.0
 
 
-def build_message(
-    milestone_id: Any, milestone_title: str | None, change_id: str | None
-) -> str:
+def build_message(milestone_id: Any, milestone_title: str | None, change_id: str | None) -> str:
     """`M<n>: <title first line> (<change_id>)` — the convention the first
     live change's hand-made milestone commits already used."""
     raw_id = str(milestone_id).strip()
