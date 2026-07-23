@@ -133,16 +133,19 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    state = container_state()
-    print(f"container: {state or 'not present'}")
-    if state == "running":
-        image = _run(["docker", "inspect", "-f", "{{.Config.Image}}", CONTAINER]).stdout.strip()
-        print(f"image:     {image}")
-        try:
-            print(f"runs:      {len(client.get_runs())} registered ({config.resolve_url()})")
-        except OSError as exc:
-            print(f"API:       unreachable ({exc})", file=sys.stderr)
-            return 1
+    # API-only on purpose: the daemon's HTTP API is the source of truth for
+    # "is the daemon up", and it answers the same from the host and from
+    # inside a claudebox — where docker-side probes lie (the socket proxy
+    # namespaces container names, so foreign containers inspect as absent).
+    url = config.resolve_url()
+    try:
+        runs = client.get_runs()
+    except OSError as exc:
+        print(f"daemon: unreachable at {url} ({exc})", file=sys.stderr)
+        print("host-side: `orch daemon start` (or `docker ps` to inspect)", file=sys.stderr)
+        return 1
+    print(f"daemon: healthy ({url})")
+    print(f"runs:   {len(runs)} registered")
     return 0
 
 
@@ -164,7 +167,9 @@ def register(sub: argparse._SubParsersAction) -> None:
         "so a consuming box's config.yaml ${ORCHESTRATION_DAEMON_TOKEN} interpolation resolves",
     ).set_defaults(func=cmd_env)
     dsub.add_parser("stop", help="remove the daemon container").set_defaults(func=cmd_stop)
-    dsub.add_parser("status", help="container + API health").set_defaults(func=cmd_status)
+    dsub.add_parser("status", help="daemon API health (works host-side and in-box)").set_defaults(
+        func=cmd_status
+    )
     p_logs = dsub.add_parser("logs", help="docker logs")
     p_logs.add_argument("-f", "--follow", action="store_true")
     p_logs.set_defaults(func=cmd_logs)
