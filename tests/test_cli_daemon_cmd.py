@@ -131,3 +131,26 @@ def test_env_exit1_before_first_start(monkeypatch, tmp_path, capsys):
     assert dc.cmd_env(_ns()) == 1
     err = capsys.readouterr().err
     assert "orch daemon start" in err
+
+
+def test_status_healthy_via_api_no_docker(monkeypatch, capsys):
+    def no_docker(argv, **kw):
+        raise AssertionError(f"status must not shell out to docker: {argv}")
+
+    monkeypatch.setattr(dc, "_run", no_docker)
+    monkeypatch.setattr(dc.client, "get_runs", lambda: [{"change_id": "a"}, {"change_id": "b"}])
+    assert dc.cmd_status(_ns()) == 0
+    out = capsys.readouterr().out
+    assert "daemon: healthy" in out
+    assert "2 registered" in out
+
+
+def test_status_exit1_when_api_unreachable(monkeypatch, capsys):
+    def boom():
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(dc.client, "get_runs", boom)
+    assert dc.cmd_status(_ns()) == 1
+    err = capsys.readouterr().err
+    assert "unreachable" in err
+    assert "orch daemon start" in err
