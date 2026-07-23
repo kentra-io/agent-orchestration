@@ -1,9 +1,9 @@
 # milestone.yaml -- the 3-attempt escalation ladder for ONE spec-lifecycle
 # milestone (M5: "the fine-direct demo").
 #
-# implementer -> gates -> verifier -> [$end | counter] -> [orchestrator | escalate]
-#                  ^                                           |
-#                  +------------------ (loop back) ------------+
+# implementer -> gates -> verifier -> [commit -> $end | counter] -> [orchestrator | escalate]
+#                  ^                                                     |
+#                  +------------------ (loop back) ----------------------+
 #
 # Locked semantics (orchestration.md sec 4, implementation-plan.md P5):
 #   - Exactly 3 resolution attempts: 1 solo + 2 orchestrator-guided.
@@ -97,6 +97,37 @@ workflow:
         drive pass/fail entirely through the (stub-scripted) Verifier; a real
         wiring (M6+) templates the milestone's actual validation-contract
         command here.
+    change_id:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The spec-lifecycle change id, used only in the `commit` step's
+        message suffix. Optional (empty in the stub tier / standalone runs);
+        forwarded by execute-change.yaml's milestone_step input_mapping.
+    commit_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        Skip the real `git add`/`git commit` in the `commit` step (hermetic
+        default — the stub tier runs script steps for real, and must never
+        commit into a checkout). The launcher flips this to false for the
+        production tier so every verified milestone is committed at the
+        same cadence as the checkpoint cursor (the durability gap from the
+        first live runs — a crash between verification and a human's
+        out-of-band commit used to lose verified work).
+    commit_paths:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        JSON-encoded list of pathspecs confining the `commit` step's
+        `git add` — the milestone's declared contract.paths, forwarded by
+        execute-change.yaml. Empty = stage the whole worktree. Confinement
+        keeps an errant out-of-declared-paths write uncommitted (surfaced
+        in the next diff) instead of silently folding it into the milestone
+        commit.
     notify_dry_run:
       type: boolean
       required: false
@@ -115,9 +146,10 @@ workflow:
 
   limits:
     # 3 attempts * 3 provider/script steps (implementer/gates/verifier) + 2
-    # orchestrator resolutions + counter + escalate + human_gate, with
-    # headroom (P4: "computed from the plan, generously oversized").
-    max_iterations: 20
+    # orchestrator resolutions + counter + escalate + human_gate + the
+    # success-path commit step, with headroom (P4: "computed from the plan,
+    # generously oversized").
+    max_iterations: 22
 
 agents:
   - name: implementer
@@ -221,9 +253,33 @@ agents:
       # a `pass` JSON field (flakiness has no `pass` key; exit code is the
       # one uniform signal every harness checker shares). Verifier is the
       # judging step -- it legitimately exposes a `pass` field.
-      - to: "$end"
+      - to: commit
         when: "{{ gates.output.exit_code == 0 and verifier.output.pass }}"
       - to: counter
+
+  - name: commit
+    type: script
+    description: >-
+      Deterministic milestone commit (durability finish for ONE milestone,
+      `orchestration.launch.milestone_commit`) -- after gates + Verifier
+      pass, persist the verified diff at the same cadence as the checkpoint
+      cursor. The commit verb stays out of every LLM's hands (same consent
+      boundary as archive_handoff, spec sec 7.3) and the author!=verifier
+      spine holds: the Implementer never commits its own work. Hermetic
+      default is dry-run (`commit_dry_run: true`); a non-zero exit
+      (status "error") fails the workflow LOUDLY -- a commit failure after
+      verified work must never be silent.
+    command: python3
+    args: ["-m", "orchestration.launch.milestone_commit"]
+    stdin: >-
+      {{ {"worktree": workflow.input.worktree if workflow.input.worktree else ".",
+      "milestone_id": workflow.input.milestone_id,
+      "milestone_title": workflow.input.milestone_summary,
+      "change_id": workflow.input.change_id,
+      "dry_run": workflow.input.commit_dry_run,
+      "paths": workflow.input.commit_paths} | tojson }}
+    routes:
+      - to: "$end"
 
   - name: counter
     type: set
@@ -315,6 +371,8 @@ agents:
 output:
   milestone_id: "{{ workflow.input.milestone_id }}"
   passed: "{{ gates.output.exit_code == 0 and verifier.output.pass }}"
+  commit_status: "{{ commit.output.status if commit is defined else '' }}"
+  commit_sha: "{{ commit.output.sha if commit is defined else '' }}"
   attempts: "{{ counter.output.attempts if counter is defined else 0 }}"
   escalated: "{{ true if human_gate is defined else false }}"
   escalation_label: "{{ escalate.output.label if escalate is defined else '' }}"
