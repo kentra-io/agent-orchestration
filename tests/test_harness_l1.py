@@ -1,5 +1,6 @@
 import sys
 
+from orchestration.harness.common import run_command
 from orchestration.harness.l1_acceptance import check
 
 
@@ -24,6 +25,28 @@ def test_stdout_and_stderr_are_captured():
     )
     assert "out-marker" in verdict["stdout_tail"]
     assert "err-marker" in verdict["stderr_tail"]
+
+
+def test_run_command_drops_inherited_tmpdir(monkeypatch):
+    """#30: gate subprocesses must NOT inherit the launcher's in-worktree
+    checkpoint TMPDIR (it relocates pytest's tmp root INTO the run worktree)."""
+    monkeypatch.setenv("TMPDIR", "/sentinel-in-worktree-tmp")
+    code, stdout, _ = run_command(
+        f"{sys.executable} -c 'import os; print(os.environ.get(\"TMPDIR\"))'"
+    )
+    assert code == 0
+    assert stdout.strip() == "None"
+
+
+def test_run_command_explicit_tmpdir_override_still_wins(monkeypatch, tmp_path):
+    """An explicit env_overrides['TMPDIR'] is applied AFTER the #30 pop."""
+    monkeypatch.setenv("TMPDIR", "/sentinel-in-worktree-tmp")
+    code, stdout, _ = run_command(
+        f"{sys.executable} -c 'import os; print(os.environ.get(\"TMPDIR\"))'",
+        env_overrides={"TMPDIR": str(tmp_path)},
+    )
+    assert code == 0
+    assert stdout.strip() == str(tmp_path)
 
 
 def test_against_testbed_acceptance_command(testbed):

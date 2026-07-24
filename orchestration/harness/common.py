@@ -151,6 +151,9 @@ def run_command(
     import os
 
     env = os.environ.copy()
+    # #30: gate subprocesses must not inherit the launcher's in-worktree
+    # checkpoint TMPDIR (an explicit env_overrides["TMPDIR"] still wins below).
+    env.pop("TMPDIR", None)
     if env_overrides:
         env.update(env_overrides)
 
