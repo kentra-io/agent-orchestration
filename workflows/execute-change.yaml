@@ -201,6 +201,16 @@ agents:
       milestone_id: "{{ read_plan.output.milestones[cursor.output.index].id }}"
       milestone_summary: "{{ read_plan.output.milestones[cursor.output.index].title }}"
       attempt_threshold: "{{ workflow.input.attempt_threshold }}"
+      # L1 gate wiring (#16 fix): forward the CURRENT milestone's own
+      # contract.check, not just the static root default -- the same
+      # dict-get idiom as commit_paths below (a plan item without a
+      # `contract` key, or without a `check` field, must fall back to ''
+      # rather than tripping StrictUndefined mid-render). milestone.yaml's
+      # `gates` step gives this precedence over gates_l1_command whenever
+      # it is non-empty and not the literal "none" sentinel.
+      contract_check: >-
+        {{ ((read_plan.output.milestones[cursor.output.index].get('contract')
+        or {}).get('check') or '') }}
       gates_l1_command: "{{ workflow.input.gates_l1_command }}"
       notify_dry_run: "{{ workflow.input.notify_dry_run }}"
       # Milestone-commit wiring (durability finish): change_id feeds the

@@ -87,16 +87,42 @@ workflow:
       required: false
       default: 3
       description: Ladder threshold (locked default 3 -- 1 solo + 2 orchestrator-guided).
+    contract_check:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The milestone's OWN L1 acceptance-check command -- the plan's
+        `contract.check` (spec-lifecycle's `lifecycle apply --format json`
+        surface, see `orchestration/resume/plan.py`), forwarded by
+        execute-change.yaml's milestone_step input_mapping via a dict-get
+        expression (matching `commit_paths`' idiom) so a plan item with no
+        `contract` key, or no `check` field, falls back to "" here rather
+        than tripping StrictUndefined mid-render. WINS over the static
+        `gates_l1_command` override below whenever it is non-empty and not
+        the literal sentinel `"none"` (spec-lifecycle's "unverifiable work"
+        marker) -- see the `gates` step for the full precedence + native-
+        skip policy (#16 fix, 2026-07-24: this used to never reach the
+        gate at all -- every production milestone's L1 check was silently
+        the static `"exit 0"` default). Left at "" for a standalone run of
+        this workflow (the M5 stub-tier calling convention documented
+        above), which then falls through to `gates_l1_command`.
     gates_l1_command:
       type: string
       required: false
       default: "exit 0"
       description: >-
-        The milestone's L1 acceptance-check command (exit-code gated). M5
-        control-flow tests leave this at the trivial always-pass default and
-        drive pass/fail entirely through the (stub-scripted) Verifier; a real
-        wiring (M6+) templates the milestone's actual validation-contract
-        command here.
+        Static override for the milestone's L1 acceptance-check command --
+        a hermetic/test escape hatch, and the fallback for a milestone that
+        genuinely declares no `contract.check`. NOT the production wiring:
+        `contract_check` above carries the real per-milestone check and
+        WINS whenever it is present (non-empty, not `"none"`); this input
+        only takes effect when `contract_check` is absent/empty/`"none"`.
+        M5's hermetic control-flow tests lean on exactly that fallback --
+        they leave `contract_check` at its default and drive pass/fail
+        entirely through the (stub-scripted) Verifier via this trivial
+        always-pass default. See the `gates` step below for the full
+        precedence + native `l1`-omission skip policy.
     change_id:
       type: string
       required: false
@@ -198,10 +224,25 @@ agents:
     description: >-
       Deterministic verification (M4 harness) -- composes L1 + L2 +
       diff-confined-paths + deviation cross-check via
-      orchestration.harness.gates. Routed on EXIT CODE, not `pass`.
+      orchestration.harness.gates. Routed on EXIT CODE, not `pass`. L1
+      precedence (#16 fix): `contract_check` (the milestone's own,
+      forwarded from the plan's `contract.check`) WINS over the static
+      `gates_l1_command` override whenever it is non-empty and not the
+      literal `"none"` sentinel; the static input is the fallback (and
+      the hermetic/test escape hatch) -- see both inputs' descriptions
+      above. Whichever resolved value is empty/`"none"` OMITS the `l1`
+      key entirely (a native skip) rather than sending an empty command,
+      which `orchestration.harness.l1_acceptance` would reject as a
+      harness error (exit 2), not a trivial pass.
     command: python3
     args: ["-m", "orchestration.harness.gates"]
-    stdin: '{"l1": {"command": "{{ workflow.input.gates_l1_command }}"}}'
+    stdin: >-
+      {% set _contract_check = workflow.input.contract_check | trim %}
+      {% set _static_check = workflow.input.gates_l1_command | trim %}
+      {% set _check = _contract_check if (_contract_check and
+      _contract_check != 'none') else _static_check %}
+      {{ ({"l1": {"command": _check}} if (_check and _check != 'none')
+      else {}) | tojson }}
     routes:
       - to: verifier
 
@@ -266,9 +307,14 @@ agents:
       cursor. The commit verb stays out of every LLM's hands (same consent
       boundary as archive_handoff, spec sec 7.3) and the author!=verifier
       spine holds: the Implementer never commits its own work. Hermetic
-      default is dry-run (`commit_dry_run: true`); a non-zero exit
-      (status "error") fails the workflow LOUDLY -- a commit failure after
-      verified work must never be silent.
+      default is dry-run (`commit_dry_run: true`). A non-zero exit
+      (status "error" or, #23, "empty_paths" -- the declared contract.paths
+      staged nothing while the worktree has changes elsewhere) routes to
+      `commit_failed` below instead of `$end`: a script step's exit code is
+      NOT self-enforcing in this engine (see `conductor.executor.script`
+      -- it only records `exit_code` in the output; routing is what turns
+      it into a workflow-level failure), so the `when:` on the routes
+      below is load-bearing, not decorative.
     command: python3
     args: ["-m", "orchestration.launch.milestone_commit"]
     stdin: >-
@@ -280,6 +326,24 @@ agents:
       "paths": workflow.input.commit_paths} | tojson }}
     routes:
       - to: "$end"
+        when: "{{ commit.output.exit_code == 0 }}"
+      - to: commit_failed
+
+  - name: commit_failed
+    type: terminate
+    status: failed
+    description: >-
+      #23 / durability-failure sink: reached only when the `commit` step's
+      exit code is non-zero (status "empty_paths" or "error"). Ends the
+      run LOUDLY via Conductor's own `type: terminate` (raises
+      `WorkflowTerminated`, non-zero process exit) instead of silently
+      routing to `$end` as if the milestone had passed -- a verified
+      milestone whose diff never made it into a commit must never look
+      like a clean success.
+    reason: >-
+      Milestone {{ workflow.input.milestone_id }} was verified but its
+      commit step did not succeed (status={{ commit.output.status }}):
+      {{ commit.output.reason }}
 
   - name: counter
     type: set
@@ -371,6 +435,7 @@ agents:
 output:
   milestone_id: "{{ workflow.input.milestone_id }}"
   passed: "{{ gates.output.exit_code == 0 and verifier.output.pass }}"
+  l1_command: "{{ gates.output.report.l1.command if gates.output.report.l1 else none }}"
   commit_status: "{{ commit.output.status if commit is defined else '' }}"
   commit_sha: "{{ commit.output.sha if commit is defined else '' }}"
   attempts: "{{ counter.output.attempts if counter is defined else 0 }}"

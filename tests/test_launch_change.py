@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import yaml
 from launch_testbed import git_env, init_repo, write_personas, write_plan_fixture
 from stub_provider import write_stub_script
 
@@ -150,6 +151,57 @@ class TestMaterializeBox:
         config_text = (worktree / ".claudebox" / "config.yaml").read_text(encoding="utf-8")
         assert "provisioning:" in config_text
         assert f"claude_dir_source: {agent_claude.resolve()}" in config_text
+
+    def test_merges_into_existing_config_instead_of_clobbering_it(self, tmp_path: Path) -> None:
+        """#27 regression: a project's own .claudebox/config.yaml (env/security/
+        pre-existing provisioning subkeys) must survive materialize_box -- only
+        `provisioning.claude_dir_source` gets set."""
+        repo = init_repo(tmp_path / "repo")
+        worktree = create_worktree(repo, tmp_path / "wt", "change/c-merge")
+        personas_dir = write_personas(tmp_path / "personas")
+
+        config_path = worktree / ".claudebox" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "env:\n"
+            "  GH_TOKEN: ${GH_TOKEN}\n"
+            "  GIT_AUTHOR_NAME: someone\n"
+            "security:\n"
+            "  network: restricted\n"
+            "provisioning:\n"
+            "  claude_dir_source: /old/stale/path\n"
+            "  extra_flag: true\n",
+            encoding="utf-8",
+        )
+
+        result = materialize_box(worktree, personas_dir)
+
+        merged = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert merged["env"] == {"GH_TOKEN": "${GH_TOKEN}", "GIT_AUTHOR_NAME": "someone"}
+        assert merged["security"] == {"network": "restricted"}
+        assert merged["provisioning"]["extra_flag"] is True
+        assert merged["provisioning"]["claude_dir_source"] == result["claude_dir_source"]
+        assert merged["provisioning"]["claude_dir_source"] == str(
+            (worktree / ".agent-claude").resolve()
+        )
+
+    def test_malformed_existing_config_raises_and_is_not_overwritten(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")
+        worktree = create_worktree(repo, tmp_path / "wt", "change/c-bad-yaml")
+        personas_dir = write_personas(tmp_path / "personas")
+
+        config_path = worktree / ".claudebox" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        bad_yaml = "env:\n  FOO: [unterminated\n"
+        config_path.write_text(bad_yaml, encoding="utf-8")
+
+        try:
+            materialize_box(worktree, personas_dir)
+            raise AssertionError("expected a ChangeLaunchError")
+        except ChangeLaunchError as exc:
+            assert "not valid YAML" in str(exc)
+
+        assert config_path.read_text(encoding="utf-8") == bad_yaml
 
 
 # ---------------------------------------------------------------------------
