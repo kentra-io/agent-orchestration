@@ -28,14 +28,17 @@ GATE_AGENTS = ("human_gate", "milestone_step")
 # report with no real stderr/stdout tail, e.g. `claude subprocess exited 1
 # (no diagnostics)` or the currently-vendored `claude subprocess exited with
 # code 1: (no stderr or stdout diagnostics)` — anything naming the exit AND
-# flagging its own diagnostics as absent. Deliberately narrow: the vendored
-# provider only ever writes the word "diagnostics" into that placeholder —
-# when it instead has real stderr/stdout, it substitutes that text in place
-# of the placeholder, so a message carrying real content won't contain
-# "diagnostics" and falls through to the oauth/api patterns above (or to bare
-# "unknown") instead of landing here.
+# flagging its own diagnostics as absent. Deliberately narrow: matched on the
+# exact `(no diagnostics)` / `(no stderr or stdout diagnostics)` placeholder
+# phrasings the provider writes, not the bare word "diagnostics" — the death
+# text classified is up to ~8KB of log tails, and real output that happens to
+# contain "diagnostics" would otherwise false-positive into this branch. When
+# the provider instead has real stderr/stdout, it substitutes that text in
+# place of the placeholder, so a message carrying real content won't match
+# either phrasing and falls through to the oauth/api patterns above (or to
+# bare "unknown") instead of landing here.
 _SUBPROCESS_EXIT_RE = re.compile(r"subprocess exited\b", re.IGNORECASE)
-_EMPTY_DIAGNOSTICS_RE = re.compile(r"\bdiagnostics\b", re.IGNORECASE)
+_EMPTY_DIAGNOSTICS_RE = re.compile(r"\(no (?:stderr or stdout )?diagnostics\)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)

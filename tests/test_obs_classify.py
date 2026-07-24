@@ -57,10 +57,13 @@ def test_bare_provider_exit_no_diagnostics_different_exit_code():
 def test_oauth_expiry_unchanged_even_though_it_names_a_subprocess_exit():
     """Regression pin: a recognizable oauth-expired shape must keep its
     existing classification even if it also happens to mention a subprocess
-    exit — the specific pattern takes precedence over the bare-exit shape."""
+    exit AND the empty-diagnostics placeholder — the specific pattern takes
+    precedence over the bare-exit shape by branch order, not because the
+    text fails to match the provider-exit pattern too."""
     v = classify(
         1,
-        "claude subprocess exited 1: OAuth session expired and could not be refreshed",
+        "claude subprocess exited 1: OAuth session expired and could not be "
+        "refreshed (no stderr or stdout diagnostics)",
         "",
         None,
     )
