@@ -20,6 +20,7 @@ def production_payload(
     change_id: str,
     branch: str | None = None,
     issue: int | None = None,
+    repo_gh: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "repo": repo,
@@ -32,6 +33,11 @@ def production_payload(
         payload["branch"] = branch
     if issue is not None:
         payload["issue"] = issue
+    # Optional "owner/repo" override for the GitHub mirror (top-level, like
+    # `issue`/`branch`); when absent the launcher derives it from the repo's
+    # origin remote (orchestration.launch.change.derive_repo_gh).
+    if repo_gh:
+        payload["repo_gh"] = repo_gh
     return payload
 
 

@@ -106,6 +106,38 @@ workflow:
       type: boolean
       required: false
       default: true
+    branch:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The run's named branch (default `change/<change_id>`, supplied by the
+        launcher). Forwarded to milestone.yaml's `push`/`tick` mirror steps.
+    push_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        Skip the real per-milestone `git push` in milestone.yaml's `push`
+        step (hermetic default). The launcher flips this to false for the
+        production (box) tier, alongside commit_dry_run, so every committed
+        milestone is published to the run branch.
+    notify_repo:
+      type: string
+      required: false
+      description: >-
+        "owner/repo" for milestone.yaml's `escalate`/`tick` GitHub mirrors
+        (live tier only). Derived by the launcher from the repo's `origin`
+        remote (payload `repo_gh` override wins); absent (hermetic) it renders
+        as "" and no `gh` call is made. Closing the pre-existing gap where
+        notify_repo/notify_issue were declared by milestone.yaml but never
+        forwarded here.
+    notify_issue:
+      type: number
+      required: false
+      description: >-
+        Issue number for milestone.yaml's `escalate`/`tick` GitHub mirrors
+        (live tier only). Forwarded from the launcher's `--issue`.
     commit_dry_run:
       type: boolean
       required: false
@@ -213,6 +245,18 @@ agents:
         or {}).get('check') or '') }}
       gates_l1_command: "{{ workflow.input.gates_l1_command }}"
       notify_dry_run: "{{ workflow.input.notify_dry_run }}"
+      # Mirror wiring (D9): forward the run branch, the push dry-run flag, the
+      # repo/issue identity, and the milestone manifest so milestone.yaml's
+      # `push`/`tick` steps can publish the branch and render the checklist.
+      # This closes the today-unreachable gap where notify_repo/notify_issue
+      # were declared by milestone.yaml but never forwarded from here.
+      branch: "{{ workflow.input.branch }}"
+      push_dry_run: "{{ workflow.input.push_dry_run }}"
+      notify_repo: "{{ workflow.input.notify_repo }}"
+      notify_issue: "{{ workflow.input.notify_issue }}"
+      # The whole milestone list (ids + titles) the checklist renders from --
+      # the same JSON-string idiom as commit_paths below.
+      milestone_manifest: "{{ read_plan.output.milestones | tojson }}"
       # Milestone-commit wiring (durability finish): change_id feeds the
       # commit-message suffix, commit_dry_run gates the real git call (the
       # launcher flips it false for the production tier), commit_paths
