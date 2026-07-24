@@ -31,8 +31,10 @@ cast it runs), [`spec-lifecycle`](https://github.com/kentra-io/spec-lifecycle)
 (the plan it executes and the gates it honors), and `claudebox` (the sandbox
 runtime + skills/plugins overlay each agent runs in).
 
-**Status: bootstrapped (M0) — lifecycle- and constitution-managed from day
-one; the loop itself lands over the following milestones.** See
+**Status: live — implement→verify→escalate loop, 3-layer verification,
+escalation ladder, and github-mirror all shipped (015 merged 2026-07-24).
+Open: #30 (gate-time pytest TMPDIR fix), #32 (milestoned-plan-dag
+consumption follow-on).** See
 [`orchestration.md`](./orchestration.md) for the full design specification
 and [`implementation-plan.md`](./implementation-plan.md) for the milestone
 plan and locked decisions.

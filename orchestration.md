@@ -2,6 +2,8 @@
 
 *Version: v1 draft. Generated: 2026-07-07. Status: **DESIGN — pending user review.***
 
+> **2026-07-24:** design approved and implemented — the module lives as the agent-orchestration repo (name locked 2026-07-07). Kept as the v1 design document.
+
 *Provisional name — the neutral repo/CLI name is an open item (§14.1); this doc says "the orchestration module" throughout.*
 
 *The **execution** leg of Stage 3: the business logic that drives an approved plan to merged code through a fleet of agents, with a deterministic verify-and-escalate loop and a human as the final tier. It **uses and extends Microsoft Conductor** as its durable workflow engine — but, unlike the sibling primitives, it **does not own that engine**: Conductor is a tool we consume and thinly patch, and the orchestration business logic (the loop, the cast, the verification harness, the escalation ladder) lives here. It **consumes** the three settled primitives — [`agent-definition`](./agent-definition.md) (the agents it runs), [`spec-lifecycle`](./spec-lifecycle/spec-lifecycle.md) (the plan it executes and the gates it honors), [`adr-sourced-constitution`](./adr-sourced-constitution/) (the governed HOW) — and the vendored [`claudebox`](./claudebox/) runtime (the sandbox each agent runs in). Files are the canonical interface; Conductor holds the durable run-state; a human is the terminal accept.*

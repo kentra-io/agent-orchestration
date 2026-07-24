@@ -71,7 +71,7 @@ All applied to `orchestration.md` (and the shared figure to `agent-definition.md
 | CI | GitHub Actions: uv + ruff + pytest (Stub tier hermetic); live tier manual/labeled | no Go toolchain |
 
 ```
-agent-orchestration/                 ← name pending user lock (P1)
+agent-orchestration/                 ← name locked 2026-07-07 (P1)
   pyproject.toml                     ← dep: kentra-io/conductor @ pinned SHA
   orchestration/
     harness/                         ← L1 runner · L2 healthcheck · diff-path checker · deviation cross-check
@@ -242,7 +242,7 @@ Start here if you are the agent implementing this plan.
 
 ## 13. Provenance
 
-- Scope pins P1–P10 + errata E1–E9: this plan, 2026-07-07, **pending user lock** (P1's name explicitly so).
+- Scope pins P1–P10 + errata E1–E9: this plan, 2026-07-07. P1 (name) and P2 (language) were explicitly user-locked 2026-07-07.
 - Live-source verification (2026-07-07, background agent): `microsoft/conductor` `main` @ `7aaa58975601ecfaf42cdf6d048e0b4cd3e36028`, release v0.1.20; claims 1–8 verified file-level (`providers/base.py`, `providers/factory.py`, `providers/claude.py`, `providers/claude_agent_sdk.py`, `config/schema.py`, `engine/checkpoint.py`, `engine/context.py`, `gates/human.py`, `engine/router.py`, docs). Inspected copies parked at `/tmp/conductor-src/` (ephemeral).
 - Build recon: [`references/conductor-integration-notes.md`](./references/conductor-integration-notes.md) (2026-06-16) — provider contract, event taxonomy, embedding pattern; its `--bare` sample corrected by erratum 9.
 - Design decisions: [`orchestration.md`](./orchestration.md) §16 (the 2026-07-07 session: ladder, 3-layer verification, sandbox spike) + [`tasks/orchestration-runtime-handoff.md`](./tasks/orchestration-runtime-handoff.md) (Conductor/claudebox/consent, 2026-07-04/05). Fine-direct + plan-home: user decisions 2026-07-07.
