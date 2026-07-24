@@ -41,21 +41,35 @@ and can never commit into a checkout.
 Path confinement: when `paths` is non-empty, only files matching those
 pathspecs are staged — an errant write outside the milestone's declared
 paths stays uncommitted (visible in the next milestone's diff) instead of
-being silently folded into the milestone commit.
+being silently folded into the milestone commit. But when confinement
+leaves NOTHING staged while the worktree is not actually clean, that is
+the #23 defect, not a legitimate no-op — see "empty_paths" below.
 
 Output JSON:
     {
-      "status": "dry_run" | "committed" | "clean" | "error",
+      "status": "dry_run" | "committed" | "clean" | "empty_paths" | "error",
       "committed": bool,
       "sha": str | null,            # the new commit (status "committed" only)
       "message": str | null,        # the commit subject used / that would be used
-      "reason": str | null,         # error detail (status "error" only)
+      "reason": str | null,         # detail (status "empty_paths"/"error" only)
       "would_run": [[str, ...], ...] | null   # argv list (status "dry_run" only)
     }
 
-Process exit code: 0 for "dry_run"/"committed"/"clean", 2 for "error"
-(malformed input, not a git repo, or a git command failed) — a failed
-commit after verified work must be LOUD, not silently swallowed.
+Process exit code: 0 for "dry_run"/"committed"/"clean", 2 for "empty_paths"/
+"error" (malformed input, not a git repo, a git command failed, or the #23
+empty-paths trap described below) — a failed commit after verified work
+must be LOUD, not silently swallowed.
+
+"empty_paths" (#23): `paths` was declared non-empty but nothing under those
+pathspecs had a diff to stage, AND the worktree has changes somewhere else
+(`git status --porcelain` is non-empty outside the staged set). This is the
+"declared contract.paths don't match where the verified work actually
+landed" trap — silently reporting "clean" here would let the workflow
+proceed as if the milestone passed while the real diff sits uncommitted,
+to be lost on cleanup. Distinguished from a genuinely clean tree (also
+`git diff --cached --quiet == 0`, but `git status --porcelain` is ALSO
+empty), which stays "clean"/EXIT_GOOD — a legitimately no-diff milestone
+(e.g. verification-only work) must not be flagged as a durability failure.
 """
 
 from __future__ import annotations
@@ -164,6 +178,36 @@ def commit(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
 
         staged = _git(worktree, ["diff", "--cached", "--quiet"])
         if staged.returncode == 0:
+            if paths:
+                # Nothing under the declared paths had a diff to stage --
+                # but is the REST of the worktree also clean, or is there
+                # verified work sitting outside the declared contract.paths
+                # (#23)? `git status --porcelain` covers the whole worktree,
+                # not just `paths`, so any output here is necessarily
+                # outside those paths (had it been inside, `git add -A --
+                # <paths>` above would have staged it, and `diff --cached`
+                # would not be empty).
+                worktree_status = _git(worktree, ["status", "--porcelain"])
+                if worktree_status.returncode != 0:
+                    return error(
+                        f"`git status` failed (exit {worktree_status.returncode}): "
+                        f"{worktree_status.stderr.strip()}"
+                    )
+                if worktree_status.stdout.strip():
+                    return {
+                        "status": "empty_paths",
+                        "committed": False,
+                        "sha": None,
+                        "message": message,
+                        "would_run": None,
+                        "reason": (
+                            f"declared contract.paths {paths!r} matched no changes to "
+                            "stage, but the worktree has changes outside those paths "
+                            "-- refusing to report a clean/passed milestone while "
+                            "verified work sits uncommitted (#23). "
+                            f"git status --porcelain:\n{worktree_status.stdout.strip()}"
+                        ),
+                    }, EXIT_ERROR
             return {
                 "status": "clean",
                 "committed": False,

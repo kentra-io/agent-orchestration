@@ -307,9 +307,14 @@ agents:
       cursor. The commit verb stays out of every LLM's hands (same consent
       boundary as archive_handoff, spec sec 7.3) and the author!=verifier
       spine holds: the Implementer never commits its own work. Hermetic
-      default is dry-run (`commit_dry_run: true`); a non-zero exit
-      (status "error") fails the workflow LOUDLY -- a commit failure after
-      verified work must never be silent.
+      default is dry-run (`commit_dry_run: true`). A non-zero exit
+      (status "error" or, #23, "empty_paths" -- the declared contract.paths
+      staged nothing while the worktree has changes elsewhere) routes to
+      `commit_failed` below instead of `$end`: a script step's exit code is
+      NOT self-enforcing in this engine (see `conductor.executor.script`
+      -- it only records `exit_code` in the output; routing is what turns
+      it into a workflow-level failure), so the `when:` on the routes
+      below is load-bearing, not decorative.
     command: python3
     args: ["-m", "orchestration.launch.milestone_commit"]
     stdin: >-
@@ -321,6 +326,24 @@ agents:
       "paths": workflow.input.commit_paths} | tojson }}
     routes:
       - to: "$end"
+        when: "{{ commit.output.exit_code == 0 }}"
+      - to: commit_failed
+
+  - name: commit_failed
+    type: terminate
+    status: failed
+    description: >-
+      #23 / durability-failure sink: reached only when the `commit` step's
+      exit code is non-zero (status "empty_paths" or "error"). Ends the
+      run LOUDLY via Conductor's own `type: terminate` (raises
+      `WorkflowTerminated`, non-zero process exit) instead of silently
+      routing to `$end` as if the milestone had passed -- a verified
+      milestone whose diff never made it into a commit must never look
+      like a clean success.
+    reason: >-
+      Milestone {{ workflow.input.milestone_id }} was verified but its
+      commit step did not succeed (status={{ commit.output.status }}):
+      {{ commit.output.reason }}
 
   - name: counter
     type: set

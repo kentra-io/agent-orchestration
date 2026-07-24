@@ -131,6 +131,102 @@ class TestRealCommit:
         ).stdout
         assert "stray.txt" in status  # left visible, not silently folded in
 
+    def test_empty_paths_with_changes_elsewhere_is_a_loud_error(self, repo: Path) -> None:
+        """#23: `paths` declares a directory that exists but is unchanged
+        this round (so `git add -A -- allowed/` succeeds and stages
+        nothing), while the REAL verified work landed outside it. Silently
+        returning "clean" here is exactly the defect -- must be a loud,
+        distinct "empty_paths" error instead."""
+        (repo / "allowed").mkdir()
+        (repo / "allowed" / "in.txt").write_text("in\n")
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "add allowed/",
+            ],
+            check=True,
+        )
+        (repo / "stray.txt").write_text("real verified work landed here\n")
+
+        verdict, code = commit(
+            {
+                "worktree": str(repo),
+                "milestone_id": 1,
+                "dry_run": False,
+                "paths": ["allowed/"],
+            }
+        )
+        assert code == EXIT_ERROR
+        assert verdict["status"] == "empty_paths"
+        assert verdict["committed"] is False
+        assert verdict["sha"] is None
+        assert "allowed/" in verdict["reason"]
+        assert "stray.txt" in verdict["reason"]
+
+        # nothing was committed -- the stray file must still be visible,
+        # uncommitted, exactly as the durability contract requires.
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--short"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "stray.txt" in status
+        log_count = subprocess.run(
+            ["git", "-C", str(repo), "log", "--oneline"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.count("\n")
+        assert log_count == 2  # base + "add allowed/" -- no new commit
+
+    def test_empty_paths_on_a_fully_clean_worktree_stays_clean(self, repo: Path) -> None:
+        """#23 counterpart: `paths` non-empty but the ENTIRE worktree is
+        clean (no changes anywhere, not just under `paths`) -- a
+        legitimately no-diff milestone (e.g. verification-only work) must
+        keep returning "clean"/EXIT_GOOD, not the new loud error."""
+        (repo / "allowed").mkdir()
+        (repo / "allowed" / "in.txt").write_text("in\n")
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "add allowed/",
+            ],
+            check=True,
+        )
+
+        verdict, code = commit(
+            {
+                "worktree": str(repo),
+                "milestone_id": 1,
+                "dry_run": False,
+                "paths": ["allowed/"],
+            }
+        )
+        assert code == EXIT_GOOD
+        assert verdict["status"] == "clean"
+        assert verdict["committed"] is False
+
     def test_paths_accepted_as_json_encoded_string(self, repo: Path) -> None:
         (repo / "allowed").mkdir()
         (repo / "allowed" / "in.txt").write_text("in\n")
