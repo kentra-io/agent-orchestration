@@ -38,6 +38,7 @@
 - **Not the agents.** The Implementer / Verifier / Orchestrator personas are [`agent-definition`](./agent-definition.md) defs — this module *runs* them, it does not define the schema. The concrete kentra cast is consuming-project data (§6, and agent-definition §12).
 - **Not the plan or the gates.** Stage definitions, approval records, milestone validation contracts, the `deviation.json` record, and the living-spec fold are [`spec-lifecycle`](./spec-lifecycle/spec-lifecycle.md)'s. This module *consumes* the plan and *honors* the gates; it requires a small set of spec-lifecycle additions (§5.5) but owns none of them.
 - **Not governance.** Authority (who may `approve`) rides the launch context, not any agent or workflow (§7). Governance content lives in the constitution.
+- **Not a multi-repo driver.** **One run drives exactly one git repository.** The run's worktree is created with `git worktree add` from the repo that holds the plan, and that single root serves as plan-root, code-root, and commit-root simultaneously: the plan is read from it (`lifecycle apply` runs with that cwd), the box is mounted at it (the agents can neither see nor write outside it), and `milestone_commit` commits with `git -C <worktree>`. A change whose deliverable is a **new standalone repo**, or that **spans two repos / multiple modules with separate git roots**, therefore cannot be driven end-to-end — the plan and the code it produces must live in the same repository. Splitting the roots is deferred (§13, [#24](https://github.com/kentra-io/agent-orchestration/issues/24)); such changes must be split by hand today.
 
 **The design spine (mirrors the siblings, with one deliberate difference):** *consume neutral primitives · own the business logic, not the engine · files are the canonical interface · determinism where it counts (the counter, the escalation), judgment where it must (the verifier), human at the boundary.* The difference from `spec-lifecycle`/`agent-definition`: those **own their engine** (a Go fold/compile engine over a neutral format); this one **extends a third-party engine** (Conductor) it deliberately does not own — so its "engine" is workflow templates + a thin provider + one fork patch, and its substance is the loop and the verification harness.
 
@@ -221,6 +222,7 @@ Authority rides the **launch context, not the agent** (agent-definition §7, loc
 
 - **Unit of concurrency = the change.** The fleet runs **many changes concurrently**, each in **its own git worktree** — git is the ACID substrate that keeps them isolated.
 - **Sequential within a change.** Milestones run **in order** (they usually carry dependencies). Parallel-within-a-change is deferred.
+- **One repo per run.** A change's worktree is a worktree *of the repo that holds its plan*, and is the only git root the run ever touches — plan-, code-, and commit-root at once. Multi-repo / multi-module (separate git roots) changes are out of scope (§1, §13).
 - **Maps to Stage 5.** The per-change-worktree model is the same isolation the Stage-5 champion–challenger A/B uses per variant (isolated worktrees, paired scoring on the same milestone) — so the concurrency substrate built here is what Stage 5 reuses.
 
 ## 10. Operator surface — the Conductor-MCP and interim operation
@@ -276,6 +278,7 @@ Versioned like the siblings (unknown `schemaVersion` ⇒ refuse; no migration ma
 | Item | Why |
 |---|---|
 | Parallel milestones **within** a change | Sequential first; the worktree substrate supports it later |
+| Multi-repo changes — a distinct **code-root/commit-root** from the plan-root, or a change whose deliverable is a **new standalone repo** | One run = one git repo is structural in v1 (§1, §9): the run worktree is a worktree *of the plan's repo* and is simultaneously the plan-, code-, and commit-root. Documented as a limitation; the fix is a real change to the worktree/mount model. [#24](https://github.com/kentra-io/agent-orchestration/issues/24) |
 | The Stage-5 controller / evaluator / champion-promotion | This module ships the per-variant *seam* (§9 worktrees + correlation metadata); the loop is Stage 5 |
 | A sophisticated Orchestrator (classify/route beyond guidance) | v1 Orchestrator emits guidance only; "make it more sophisticated later if we need to" (2026-07-07) |
 | Auto-trigger on plan-approved | v1 may start `execute-change` by explicit invocation; auto-trigger (poll/webhook) is an ergonomics layer (§14.5) |

@@ -59,6 +59,25 @@ Developing on a checkout? `make daemon-image && make daemon-run` stays the
 build-from-source path; `orch daemon start --image agent-orchestration-daemon`
 runs your local build.
 
+### Scope: one run drives one git repository
+
+A run's worktree is created with `git worktree add` **from the repo that holds
+the plan**, and that single root is the plan-root, the code-root, and the
+commit-root at once — the plan is read from it, the agents' box is mounted at
+it (so they cannot write outside it), and each milestone commit runs
+`git -C <worktree>`.
+
+So a change is only launchable when **its plan and the code it produces live in
+the same repository**. Not supported:
+
+- a change whose deliverable is a **new standalone repo**;
+- a change **spanning two repos**, or a multi-module project whose modules have
+  **separate git roots**.
+
+These must be split by hand (drive the part that lives in one repo, do the rest
+manually). See [#24](https://github.com/kentra-io/agent-orchestration/issues/24)
+and `orchestration.md` §1 / §13.
+
 ## Wiring a consuming project's boxes to the daemon
 
 The daemon is user-scoped (one per host; token minted into
