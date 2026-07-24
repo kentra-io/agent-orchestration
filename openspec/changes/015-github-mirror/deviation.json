@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-07-24T00:00:00Z",
+  "generatedAt": "2026-07-24T13:39:42Z",
   "constitutionHash": "sha256:d48b0fc0b95d8c4092b02f802abd0714051dd7e67fc8ec232746a246294c2f8c",
-  "plan": "openspec/changes/015-github-mirror/design.md",
+  "plan": "openspec/changes/015-github-mirror/tasks.md",
   "deviations": [],
   "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0}
 }

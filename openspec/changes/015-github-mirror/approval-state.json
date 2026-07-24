@@ -59,6 +59,20 @@
       "approvedBy": "jony",
       "approvedAt": "2026-07-24T13:17:52Z",
       "notes": ""
+    },
+    {
+      "stage": "plan",
+      "status": "approved",
+      "designSkipped": false,
+      "artifacts": {
+        "tasks.md": "sha256:2a791629da98f663d1d21976775648138b94f9e9e0768fb09663a590cb4e20af"
+      },
+      "constitutionHash": "sha256:d48b0fc0b95d8c4092b02f802abd0714051dd7e67fc8ec232746a246294c2f8c",
+      "deviationConstitutionHash": "sha256:d48b0fc0b95d8c4092b02f802abd0714051dd7e67fc8ec232746a246294c2f8c",
+      "deviationRef": "deviation.json",
+      "approvedBy": "jony",
+      "approvedAt": "2026-07-24T13:41:30Z",
+      "notes": ""
     }
   ]
 }
