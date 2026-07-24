@@ -59,7 +59,9 @@ Code facts this design builds on (verified 2026-07-24):
   reachability completes exactly as today.
 - Update `orchestration-monitor` / `orchestration-launch` skills with the
   issue-mirror reading guide (which flow posts what, label meanings, the
-  edited-in-place checklist).
+  edited-in-place checklist) — including the explicit rule that the mirror
+  can be out of sync with local state and that **local state is the source
+  of truth** (D10).
 
 **Non-Goals:**
 
@@ -275,7 +277,37 @@ all mirror flags together, the Stub tier leaves all defaulted true.
 existing per-step flags set the precedent, and independent flags keep each
 step's contract self-contained (a step never inspects another's config).
 
-### D10 — Test story follows the module's existing hermetic patterns
+### D10 — The mirror is advisory: local state is the source of truth
+
+Every mirror write is best-effort, so the issue **can** lag or diverge from
+reality: a failed push (checklist ahead of GitHub), a failed comment write
+(GitHub behind the run), a down daemon or `--direct` launch (no start
+comment), an absent/expired token (nothing mirrored at all). The standing
+rule — surfaced to users, not just implied by the failure posture — is:
+**when GitHub and local state disagree, local state wins.** The
+authoritative surfaces are local: the registry + derived state
+(`orch status` / `orch runs`), the worktree's branch and commits, and the
+lifecycle artifacts in the change folder. The rule is made visible in two
+places:
+
+- **Both skills** (`orchestration-monitor`, `orchestration-launch`) open
+  their issue-mirror reading guide with this rule and enumerate the known
+  divergence shapes, each mapped to the local surface that answers it
+  (e.g. checklist unticked but milestone committed → `git log` on the run
+  branch / `orch status`; no start comment → the run may be `--direct`,
+  check the registry).
+- **The mirror flags divergence where it can know it**: the
+  completed-but-local-only checklist annotation (D4), and a standing
+  checklist footer stating the mirror is a best-effort projection and
+  naming `orch status <change>` as the authoritative check — so a human
+  reading only the issue is told when (and how) to distrust it.
+
+*Alternative considered*: reconciling GitHub → local (treating the issue
+as a writable source and syncing back). Rejected — writes flow strictly
+local → GitHub; the issue is a projection, and bidirectional sync would
+manufacture conflicts the run model has no way to resolve.
+
+### D11 — Test story follows the module's existing hermetic patterns
 
 - `milestone_push.py`: real-git `tmp_path` repos (the `milestone_commit`
   fixture pattern) pushing to a **local `git init --bare` origin** — real
