@@ -78,6 +78,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from orchestration.harness.common import (
@@ -172,6 +173,22 @@ def commit(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
         }, EXIT_ERROR
 
     try:
+        # #30: refuse to commit unless `worktree` is itself the repo toplevel.
+        # A bare directory nested inside a real checkout (e.g. a pytest
+        # tmp_path relocated into the run worktree) would otherwise resolve
+        # the ENCLOSING repo and sweep its dirty state onto the live branch.
+        toplevel = _git(worktree, ["rev-parse", "--show-toplevel"])
+        if toplevel.returncode != 0:
+            return error(
+                f"`git rev-parse --show-toplevel` failed "
+                f"(exit {toplevel.returncode}): {toplevel.stderr.strip()}"
+            )
+        if Path(toplevel.stdout.strip()).resolve() != Path(worktree).resolve():
+            return error(
+                "worktree is not a git repo toplevel; refusing to commit into "
+                "the enclosing repo (#30)"
+            )
+
         add = _git(worktree, add_argv[1:])
         if add.returncode != 0:
             return error(f"`git add` failed (exit {add.returncode}): {add.stderr.strip()}")

@@ -289,6 +289,47 @@ class TestErrors:
         assert verdict["status"] == "error"
         assert verdict["reason"]
 
+    def test_nested_non_toplevel_worktree_refuses_and_leaves_enclosing_repo_alone(
+        self, repo: Path
+    ) -> None:
+        """#30: a bare directory nested inside a real checkout (the shape a
+        pytest tmp_path takes when TMPDIR is relocated into the run worktree)
+        must be REFUSED, not resolved to the enclosing repo -- otherwise
+        `git add -A` sweeps the enclosing repo's dirty state onto the live
+        branch mid-gate (observed as junk commit 4cf627d)."""
+        nested = repo / "subdir"
+        nested.mkdir()
+        (repo / "dirty.txt").write_text("dirty enclosing state\n")
+        head_before = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        verdict, code = commit({"worktree": str(nested), "milestone_id": 1, "dry_run": False})
+        assert code == EXIT_ERROR
+        assert verdict["status"] == "error"
+        assert "not a git repo toplevel" in verdict["reason"]
+        assert "#30" in verdict["reason"]
+
+        # The enclosing repo must be untouched: same HEAD, dirty file
+        # still uncommitted, nothing staged.
+        head_after = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert head_after == head_before
+        status = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "?? dirty.txt" in status
+
     def test_bad_paths_json_string_is_an_input_error(self) -> None:
         with pytest.raises(HarnessInputError):
             commit({"milestone_id": 1, "paths": "not json ["})
