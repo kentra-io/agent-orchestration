@@ -3,18 +3,47 @@
 `gate-pause` is the BY-DESIGN non-zero exit of the crash-then-resume gate
 model (orchestration/resume/README.md): the process EOF-crashes at a
 human_gate after checkpointing. It must never read as a death.
+
+`provider-exit` (issue #7 remaining tail): the provider-masking fix (fork pin
+`ab0ff4c`) makes `ProviderError` carry real stderr/stdout in most deaths, so
+the patterns below usually fire. But when the provider genuinely captured
+nothing — the exit-code line with no stderr/stdout tail at all — there is no
+cause to name. Runs checkpoint every completed milestone (design §8 /
+orchestration/resume/README.md), so a resume is always safe-by-design after
+*any* mid-run death: it can only replay from the last completed milestone,
+never repeat one. An unexplained provider exit is exactly the case where
+staying honest ("unknown cause") *and* actionable (suggest resume) both
+matter — a production run died this way mid-milestone after hours of healthy
+progress, and the true cause was transient.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 GATE_AGENTS = ("human_gate", "milestone_step")
 
+# The historical empty-diagnostics shape: a bare provider/subprocess exit
+# report with no real stderr/stdout tail, e.g. `claude subprocess exited 1
+# (no diagnostics)` or the currently-vendored `claude subprocess exited with
+# code 1: (no stderr or stdout diagnostics)` — anything naming the exit AND
+# flagging its own diagnostics as absent. Deliberately narrow: matched on the
+# exact `(no diagnostics)` / `(no stderr or stdout diagnostics)` placeholder
+# phrasings the provider writes, not the bare word "diagnostics" — the death
+# text classified is up to ~8KB of log tails, and real output that happens to
+# contain "diagnostics" would otherwise false-positive into this branch. When
+# the provider instead has real stderr/stdout, it substitutes that text in
+# place of the placeholder, so a message carrying real content won't match
+# either phrasing and falls through to the oauth/api patterns above (or to
+# bare "unknown") instead of landing here.
+_SUBPROCESS_EXIT_RE = re.compile(r"subprocess exited\b", re.IGNORECASE)
+_EMPTY_DIAGNOSTICS_RE = re.compile(r"\(no (?:stderr or stdout )?diagnostics\)", re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class Verdict:
-    kind: str  # success | gate-pause | oauth-expired | api-transient | unknown
+    kind: str  # success | gate-pause | oauth-expired | api-transient | provider-exit | unknown
     remedy: str | None
     detail: str
 
@@ -40,4 +69,11 @@ def classify(
         )
     if "API Error" in text or "Connection closed" in text or "overloaded" in text.lower():
         return Verdict("api-transient", "transient provider failure: resume the run", text.strip())
+    if _SUBPROCESS_EXIT_RE.search(text) and _EMPTY_DIAGNOSTICS_RE.search(text):
+        return Verdict(
+            "provider-exit",
+            "cause unknown (provider captured no diagnostics), but completed "
+            "milestones are checkpointed — safe to resume: `orch resume <change-id>`",
+            text.strip(),
+        )
     return Verdict("unknown", None, text.strip())

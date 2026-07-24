@@ -1,3 +1,4 @@
+import json
 import os
 
 from orchestration.obs import registry
@@ -33,6 +34,60 @@ def test_running_when_pid_alive():
 
 def test_running_stalled_when_both_signals_old():
     s = derive_state(_entry(), Signals(True, None, 700.0, 700.0), stall_threshold_s=600)
+    assert s["state"] == "running" and s["stalled"] is True
+
+
+def _write_events(tmpdir, events):
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def test_lingering_dashboard_with_root_terminal_event_is_done_not_stalled(tmp_path):
+    # issue #14: CONDUCTOR_WEB_BG keeps the process (and pid) alive after the
+    # ROOT workflow's own terminal event so it can keep serving the
+    # dashboard; both age signals go stale exactly as a real stall would.
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [
+            {"type": "workflow_started", "data": {}},
+            {"type": "workflow_completed", "data": {"output": {}}},
+        ],
+    )
+    entry = _entry()
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, None, 700.0, 700.0), stall_threshold_s=600)
+    assert s["state"] == "done: awaiting dashboard disconnect"
+    assert s["stalled"] is False
+
+
+def test_no_terminal_event_stays_running_stalled(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(tmpdir, [{"type": "workflow_started", "data": {}}])
+    entry = _entry()
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, None, 700.0, 700.0), stall_threshold_s=600)
+    assert s["state"] == "running" and s["stalled"] is True
+
+
+def test_subworkflow_terminal_event_is_not_mistaken_for_root(tmp_path):
+    # workflow_completed WITH subworkflow_path is the milestone_step loop's
+    # own completion, not the root's — must still read as running/stalled.
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [
+            {"type": "workflow_started", "data": {}},
+            {
+                "type": "workflow_completed",
+                "data": {"output": {}, "subworkflow_path": ["milestone_step"]},
+            },
+        ],
+    )
+    entry = _entry()
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, None, 700.0, 700.0), stall_threshold_s=600)
     assert s["state"] == "running" and s["stalled"] is True
 
 

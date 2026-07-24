@@ -8,6 +8,7 @@ never from event freshness alone.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -16,6 +17,16 @@ from typing import Any
 
 _SKIP_DIRS = {".git", ".conductor-tmp", ".venv", "node_modules", "__pycache__"}
 _MTIME_SCAN_CAP = 5000
+
+# The engine tags a `workflow_completed`/`workflow_failed` event with
+# `data.subworkflow_path` (a non-empty list) whenever it is emitted from
+# inside a nested subworkflow call frame (e.g. the per-milestone
+# `milestone_step` loop); the ROOT workflow's own terminal event carries no
+# such key. Verified against a real `*.events.jsonl` (kafka-dq
+# 001-e2e-poc): the root event is also the last line the engine ever
+# writes, which is why a bounded tail read is enough (issue #14).
+_TERMINAL_ROOT_EVENT_TYPES = {"workflow_completed", "workflow_failed"}
+_TERMINAL_TAIL_BYTES = 65536
 
 
 @dataclass(frozen=True)
@@ -73,6 +84,33 @@ def _events_age(tmpdir: Path) -> float | None:
     return max(0.0, time.time() - candidates[-1].stat().st_mtime)
 
 
+def _has_terminal_root_event(tmpdir: Path) -> bool:
+    """True once the ROOT workflow itself (not a subworkflow) has recorded
+    its own `workflow_completed`/`workflow_failed` — see module docstring
+    for the `subworkflow_path` discriminator. Reuses the same events-file
+    glob as `_events_age`; no new data source.
+    """
+    candidates = sorted(
+        tmpdir.glob("checkpoints/**/*.events.jsonl"), key=lambda p: p.stat().st_mtime
+    )
+    if not candidates:
+        return False
+    tail = tail_file(candidates[-1], max_bytes=_TERMINAL_TAIL_BYTES)
+    for line in tail.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # a tail read can start mid-line; skip the fragment
+        if event.get("type") in _TERMINAL_ROOT_EVENT_TYPES and not event.get("data", {}).get(
+            "subworkflow_path"
+        ):
+            return True
+    return False
+
+
 def collect(entry: dict[str, Any]) -> Signals:
     last = entry["incarnations"][-1] if entry["incarnations"] else {}
     return Signals(
@@ -105,6 +143,17 @@ def derive_state(
             and signals.events_age_s > stall_threshold_s
             and signals.worktree_mtime_age_s > stall_threshold_s
         )
+        # A finished-but-lingering `--web-bg` process (launch/change.py sets
+        # CONDUCTOR_WEB_BG=1) matches the stall signature exactly: the pid
+        # is alive and both ages are old, yet the ROOT workflow already
+        # reached a terminal event. Only worth the extra events-file read
+        # in that (otherwise-misreported) case — issue #14.
+        if stalled and _has_terminal_root_event(Path(entry["tmpdir"])):
+            return {
+                "state": "done: awaiting dashboard disconnect",
+                "stalled": False,
+                "classified": None,
+            }
         return {"state": "running", "stalled": stalled, "classified": None}
     if signals.pid_alive is False:
         return {"state": "dead: unreconciled", "stalled": False, "classified": None}
