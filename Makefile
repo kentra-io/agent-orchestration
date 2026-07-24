@@ -1,11 +1,8 @@
-# `cb` is a shell function that wraps the real `claudebox` binary, so resolve
-# the binary directly -- `which cb` would yield the function body, not a path.
-CB_BIN ?= $(shell command -v claudebox)
 CODE_ROOT ?= $(HOME)/code
 
+# cb is built from source inside the Dockerfile (cb-build stage, pinned
+# CLAUDEBOX_REF) — no host binary, so no CB_BIN and no macOS-arch footgun (#21).
 daemon-image:
-	@test -f "$(CB_BIN)" || (echo "claudebox binary not found; pass CB_BIN=\$$(command -v claudebox)" && exit 1)
-	mkdir -p bin && cp "$(CB_BIN)" bin/cb
 	docker build -f container/daemon/Dockerfile -t agent-orchestration-daemon .
 
 daemon-run:

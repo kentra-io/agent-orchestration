@@ -1,8 +1,20 @@
 # agent-orchestration daemon (design §6). Build FROM THE HOST (the image needs
 # the real docker socket at runtime; building in-box is pointless).
-#   make daemon-image CB_BIN=/path/to/cb
+#   make daemon-image      # no CB_BIN needed — cb is built from source below
 FROM golang:1.26-bookworm AS lifecycle-build
 RUN go install github.com/kentra-io/spec-lifecycle/cmd/lifecycle@4d1f002755ac
+
+# cb (claudebox CLI) — kentra-io/claudebox ships no prebuilt linux/arm64 binary,
+# so build it here from a PINNED public ref for the image's own arch. This
+# removes the host-binary copy that let a macOS `claudebox` get baked into the
+# linux image (Mach-O → "Exec format error" at launch, issue #21). Bump the ref
+# deliberately, like the lifecycle pin above (ADR-0001 spirit); keep it in sync
+# with CLAUDEBOX_REF in .github/workflows/publish-daemon.yml.
+FROM golang:1.26-bookworm AS cb-build
+ARG CLAUDEBOX_REF=92d7855f654803dd7cef278d7607c65ae77e0a11
+RUN git clone --quiet https://github.com/kentra-io/claudebox /src \
+    && git -C /src checkout --quiet "$CLAUDEBOX_REF" \
+    && cd /src && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /cb .
 
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates \
@@ -23,9 +35,8 @@ COPY --from=lifecycle-build /go/bin/lifecycle /usr/local/bin/lifecycle
 # out to `claude auth status --json` before provisioning a box, so the daemon
 # image must carry it. Installs to /root/.local/bin (daemon runs as root).
 RUN curl -fsSL https://claude.ai/install.sh | bash
-# cb (claudebox CLI) — no prebuilt linux/arm64 release, so the binary is
-# provided by the build context (CI builds it from the pinned public ref)
-COPY bin/cb /usr/local/bin/cb
+# cb (claudebox CLI) — built for this image's arch in the cb-build stage above.
+COPY --from=cb-build /cb /usr/local/bin/cb
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
