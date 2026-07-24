@@ -70,6 +70,7 @@ from orchestration.harness.common import (
     EXIT_ERROR,
     EXIT_GOOD,
     HarnessInputError,
+    coerce_bool,
     emit,
     read_input,
 )
@@ -119,7 +120,7 @@ def commit(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     if milestone_id is None or str(milestone_id).strip() == "":
         raise HarnessInputError("'milestone_id' is required")
     worktree = str(payload.get("worktree") or ".")
-    dry_run = bool(payload.get("dry_run", True))
+    dry_run = coerce_bool(payload.get("dry_run", True), default=True)
     paths = payload.get("paths") or []
     if isinstance(paths, str):
         # The workflow forwards contract.paths through a string-typed input

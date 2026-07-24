@@ -71,6 +71,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from orchestration.harness.common import coerce_bool
+
 EXIT_GOOD = 0
 EXIT_ATTENTION = 1
 EXIT_ERROR = 2
@@ -129,7 +131,7 @@ def _emit(verdict: dict[str, Any]) -> None:
 def archive(payload: dict[str, Any]) -> dict[str, Any]:
     worktree = payload.get("worktree") or "."
     change_id = payload.get("change_id") or ""
-    dry_run = payload.get("dry_run", True)
+    dry_run = coerce_bool(payload.get("dry_run", True), default=True)
     lifecycle_bin = payload.get("lifecycle_bin", "lifecycle")
 
     if not dry_run and not change_id:

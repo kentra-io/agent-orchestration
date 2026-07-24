@@ -32,7 +32,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from orchestration.launch.archive_handoff import archive
+import pytest
+
+from orchestration.launch.archive_handoff import ArchiveHandoffInputError, archive
 
 _PROPOSAL = """\
 ---
@@ -173,3 +175,11 @@ class TestDryRun:
         assert report["would_run"] == ["lifecycle", "archive", change_id, "--format", "json"]
         assert (root / "openspec" / "changes" / change_id).is_dir()
         assert not (root / "openspec" / "ledger.jsonl").exists()
+
+
+def test_dry_run_false_string_is_treated_as_live_not_dry_run() -> None:
+    """#22: `archive_dry_run` reaches this step as the Jinja-rendered string
+    "false"/"False". It must be treated as live (dry_run off), which requires
+    a change_id -- not as a truthy dry-run."""
+    with pytest.raises(ArchiveHandoffInputError):
+        archive({"dry_run": "false"})

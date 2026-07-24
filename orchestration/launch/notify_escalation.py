@@ -63,6 +63,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from orchestration.harness.common import coerce_bool
+
 EXIT_GOOD = 0
 EXIT_ATTENTION = 1
 EXIT_ERROR = 2
@@ -116,7 +118,7 @@ def notify(payload: dict[str, Any]) -> dict[str, Any]:
     if not label or not isinstance(label, str):
         raise NotifyInputError("'label' (non-empty string) is required")
 
-    dry_run = payload.get("dry_run", True)
+    dry_run = coerce_bool(payload.get("dry_run", True), default=True)
     if not dry_run:
         repo = payload.get("repo")
         issue = payload.get("issue")

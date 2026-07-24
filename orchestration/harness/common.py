@@ -42,6 +42,34 @@ class HarnessInputError(ValueError):
     """The checker's input JSON is missing, malformed, or fails validation."""
 
 
+_TRUE_TOKENS = frozenset({"true", "1", "yes", "on"})
+_FALSE_TOKENS = frozenset({"false", "0", "no", "off"})
+
+
+def coerce_bool(value: Any, *, default: bool) -> bool:
+    """Coerce a workflow-forwarded flag to a real bool.
+
+    Boolean inputs reach the `script`-step modules as Jinja-rendered STRINGS
+    (a template `"{{ workflow.input.commit_dry_run }}"` renders `False` to the
+    string `"False"`), so a bare `bool(value)` is wrong: `bool("false")` is
+    `True`, which silently inverts every such flag (issue #22). Native
+    bools/ints pass through; recognized true/false tokens map case-
+    insensitively; anything unrecognized (including the empty string) falls
+    back to `default` — never a silent guess on a durability-critical flag.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
+    return default
+
+
 def read_input(argv: Sequence[str]) -> dict[str, Any]:
     """Read a checker's JSON input per the shared convention.
 
