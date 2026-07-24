@@ -36,3 +36,9 @@ verification logic MUST stay small and script-step-shaped so a later Go
 port remains possible.
 
 ADR-0003 · 2026-07-07
+
+### GitHub writes are best-effort, bot-identity, dry-run-by-default side effects
+
+Every GitHub side effect this module performs (comments, labels, issue close, branch push) MUST authenticate as the bot identity (KENTRA_BOT_GH_TOKEN via GH_TOKEN / gh auth setup-git — never a human's credentials), MUST be independent best effort (attempted, result recorded, never raised, never a step/run failure, never a reason to skip a sibling write), and MUST default to a hermetic dry_run performing no network I/O and requiring no token.
+
+ADR-0005 · 2026-07-24
