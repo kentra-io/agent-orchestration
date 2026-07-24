@@ -146,6 +146,42 @@ class TestRealCommit:
         assert verdict["status"] == "committed"
 
 
+class TestDryRunStringCoercion:
+    """Regression for #22: the workflow forwards `commit_dry_run` through a
+    Jinja `"{{ ... }}"` template, so `dry_run` reaches this module as the
+    STRING "false"/"False" (the launcher's production value), not a bool. A
+    bare `bool("false")` is truthy, which would silently skip every production
+    commit."""
+
+    @pytest.mark.parametrize("falsey", ["false", "False", "FALSE", " false ", "0", "no", "off"])
+    def test_falsey_strings_do_not_suppress_the_commit(self, repo: Path, falsey: str) -> None:
+        (repo / "work.txt").write_text("done\n")
+        verdict, code = commit({"worktree": str(repo), "milestone_id": 3, "dry_run": falsey})
+        assert code == EXIT_GOOD
+        assert verdict["status"] == "committed", (
+            f"dry_run={falsey!r} should commit, not {verdict['status']}"
+        )
+        assert verdict["committed"] is True
+
+    @pytest.mark.parametrize("truthy", ["true", "True", "1", "yes", "on"])
+    def test_truthy_strings_stay_dry_run(self, repo: Path, truthy: str) -> None:
+        (repo / "work.txt").write_text("done\n")
+        verdict, code = commit({"worktree": str(repo), "milestone_id": 3, "dry_run": truthy})
+        assert code == EXIT_GOOD
+        assert verdict["status"] == "dry_run"
+        assert verdict["committed"] is False
+
+    @pytest.mark.parametrize("ambiguous", ["", "  ", "maybe"])
+    def test_empty_or_unrecognized_falls_back_to_safe_dry_run(
+        self, repo: Path, ambiguous: str
+    ) -> None:
+        # Unset/garbage must never silently commit — default to the hermetic-safe dry-run.
+        (repo / "work.txt").write_text("done\n")
+        verdict, code = commit({"worktree": str(repo), "milestone_id": 3, "dry_run": ambiguous})
+        assert code == EXIT_GOOD
+        assert verdict["status"] == "dry_run"
+
+
 class TestErrors:
     def test_missing_milestone_id_raises_input_error(self) -> None:
         with pytest.raises(HarnessInputError):

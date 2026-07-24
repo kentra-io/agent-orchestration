@@ -97,3 +97,12 @@ def test_cli_exit_codes() -> None:
     )
     assert result.returncode == 2
     assert "error" in json.loads(result.stdout)
+
+
+def test_dry_run_false_string_is_treated_as_live_not_dry_run() -> None:
+    """#22: the workflow forwards `notify_dry_run` through a Jinja `"{{ }}"`
+    template, so it arrives as the string "false"/"False". That must be
+    treated as live (dry_run off) -- which requires repo/issue -- not as a
+    truthy dry-run that silently skips the real gh call."""
+    with pytest.raises(NotifyInputError):
+        notify({"label": "needs-human-input", "dry_run": "false"})
