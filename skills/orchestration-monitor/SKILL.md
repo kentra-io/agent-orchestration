@@ -34,6 +34,66 @@ still registered as an alias for every subcommand (`orchestration runs`,
 - `dead: unreconciled` — process gone, exit never observed; the daemon's next
   reconcile pass (or any `orch runs` call) classifies it.
 
+## The issue mirror (reading guide)
+
+**The mirror is a best-effort projection; when GitHub and local state
+disagree, local state wins.** Every mirror write is best-effort, so the
+issue can lag or diverge from reality. The authoritative surfaces are all
+local: `orch status <change-id>` / `orch runs` (the registry + derived
+state), the run branch's commits, and the lifecycle artifacts in the change
+folder. Never treat the issue as the source of truth — it is a read-only
+projection of local state, never synced back the other way.
+
+### Known divergence shapes → the local surface that answers them
+
+| What the issue shows | What it really means | Where the truth is |
+|---|---|---|
+| Checklist item unticked, but the milestone is done | A checklist (mirror) write failed | `git log` on the run branch / `orch status <change-id>` |
+| A checklist item annotated `(local-only: push failed — …)` | The commit landed locally but the push failed — the branch on GitHub is behind | `git log` on the run branch; a later successful push publishes the accumulated branch |
+| No run-started comment, but there is checklist progress | Likely a `--direct` launch (no daemon adopt), or the start write failed | The registry / `orch runs` — check the entry exists and is `running` |
+| No comments at all | Absent/expired token, or no repo+issue resolved at launch | `orch status <change-id>`; production launches need `gh` auth (ADR-0005) |
+
+### Who posts what
+
+- **Workflow** (in-run, per milestone): the branch **push** and the
+  **checklist tick** — one comment edited in place.
+- **Daemon** (process-level truths a workflow can't self-report): the
+  run-**started** comment (and a **resumed** variant on resume), the
+  run-**finished** comment on a `success` exit, and the **death** comment +
+  `run-died` label on a death classification.
+- **Archive hand-off**: **closes** the issue with a closing comment on a
+  successful archive.
+
+### Label taxonomy (two labels, never conflated)
+
+- **`run-died`** — an infrastructure/runtime failure. Remedy: **fix the
+  infra, resume**. The death comment carries the classified cause, the
+  remedy, and the real error text (never the masked "exited code 1, no
+  stderr").
+- **`needs-human-input`** — a ladder-exhausted plan escalation. Remedy:
+  **fix the plan, approve, resume**. A `gate-pause` exit is by design and is
+  *not* a death — it gets neither label nor a death comment.
+
+### Checklist / marker mechanics
+
+The checklist is a **single** comment, edited in place — located
+idempotently by a stable first-line HTML marker
+`<!-- agent-orchestration:mirror:<change_id> -->`. A passing milestone never
+posts a new comment; each tick re-renders the whole body from the milestone
+manifest plus the checked-state parsed out of the existing comment. A
+garbled or hand-edited comment self-heals on the next full re-render. The
+body carries a standing footer stating the mirror is a best-effort
+projection and naming `orch status <change-id>` as the authoritative check.
+
+### The `--direct` asymmetry
+
+A `--direct` launch (daemon down or bypassed) is invisible to the live
+supervisor — nothing adopts it, so **no run-started comment is posted** until
+a daemon lazily `reconcile`s the run's fate later. Such a run's issue shows
+**checklist progress (workflow-side) without a start comment (daemon-side)**
+until reconcile catches up. A missing start comment is therefore not a death
+signal — check the registry.
+
 ## Sharp edges (learned the hard way — issue #7)
 
 - **In-box `docker ps` LIES**: the claudebox socket-proxy filters it (the
