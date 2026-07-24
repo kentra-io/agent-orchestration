@@ -25,12 +25,14 @@ from orchestration.launch import change as change_mod
 from orchestration.launch.change import (
     ChangeLaunchError,
     create_worktree,
+    derive_repo_gh,
     launch,
     main,
     materialize_box,
     resolve_plan,
     start_box,
 )
+from orchestration.obs import registry as obs_registry
 
 REPO_ROOT = Path(__file__).parent.parent
 EXECUTE_CHANGE_WORKFLOW = REPO_ROOT / "workflows" / "execute-change.yaml"
@@ -52,6 +54,189 @@ def _base_config(tmp_path: Path, change_id: str, **overrides) -> dict:
     }
     config.update(overrides)
     return config
+
+
+def _add_origin(repo: Path, url: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", url],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# derive_repo_gh -- owner/repo from the origin remote (D9 mirror wiring)
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveRepoGh:
+    def test_ssh_scp_form(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")
+        _add_origin(repo, "git@github.com:acme/widgets.git")
+        assert derive_repo_gh(repo) == "acme/widgets"
+
+    def test_https_form(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")
+        _add_origin(repo, "https://github.com/acme/widgets.git")
+        assert derive_repo_gh(repo) == "acme/widgets"
+
+    def test_https_form_without_git_suffix(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")
+        _add_origin(repo, "https://github.com/acme/widgets")
+        assert derive_repo_gh(repo) == "acme/widgets"
+
+    def test_ssh_url_form(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")
+        _add_origin(repo, "ssh://git@github.com/acme/widgets.git")
+        assert derive_repo_gh(repo) == "acme/widgets"
+
+    def test_absent_remote_is_none(self, tmp_path: Path) -> None:
+        repo = init_repo(tmp_path / "repo")  # init_repo adds no remote
+        assert derive_repo_gh(repo) is None
+
+
+# ---------------------------------------------------------------------------
+# launch() -- repo_gh fact + mirror input threading (D9)
+# ---------------------------------------------------------------------------
+
+
+class TestMirrorInputThreading:
+    def _config(self, tmp_path: Path, change_id: str, **overrides) -> dict:
+        repo = init_repo(tmp_path / "repo")
+        origin = overrides.pop("origin", None)
+        if origin:
+            _add_origin(repo, origin)
+        plan = write_plan_fixture(tmp_path / "plan.json", [{"id": 1, "title": "do the work"}])
+        config = {
+            "repo": str(repo),
+            "change_id": change_id,
+            "worktree_root": str(tmp_path / "worktrees"),
+            "box": {"enabled": False},
+            "conductor": {
+                "workflow": str(EXECUTE_CHANGE_WORKFLOW),
+                "plan_fixture_path": str(plan),
+            },
+            "dry_run": True,
+        }
+        config.update(overrides)
+        return config
+
+    @staticmethod
+    def _input_val(argv: list[str], key: str) -> str | None:
+        """Return the value of the LAST `--input key=value` for `key`, or None."""
+        val = None
+        for tok in argv:
+            if tok.startswith(f"{key}="):
+                val = tok[len(key) + 1 :]
+        return val
+
+    def test_stub_tier_threads_branch_repo_issue_but_leaves_dry_run_defaults(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "registry"))
+        config = self._config(
+            tmp_path,
+            "c-stub-thread",
+            origin="git@github.com:acme/widgets.git",
+            issue=15,
+        )
+
+        report = launch(config)
+        argv = report["conductor_argv"]
+
+        # Facts threaded unconditionally.
+        assert self._input_val(argv, "branch") == "change/c-stub-thread"
+        assert self._input_val(argv, "notify_repo") == "acme/widgets"
+        assert self._input_val(argv, "notify_issue") == "15"
+        # Stub tier leaves every mirror dry-run flag defaulted true (absent).
+        assert self._input_val(argv, "push_dry_run") is None
+        assert self._input_val(argv, "notify_dry_run") is None
+        assert self._input_val(argv, "commit_dry_run") is None
+
+        # The derived owner/repo lands on the registry entry as a fact.
+        entry = obs_registry.load_entry("repo", "c-stub-thread")
+        assert entry is not None
+        assert entry["repo_gh"] == "acme/widgets"
+        assert entry["issue"] == 15
+
+    def test_box_tier_flips_push_and_notify_dry_run_false_when_repo_and_issue_resolved(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "registry"))
+        personas_dir = write_personas(tmp_path / "personas")
+        config = self._config(
+            tmp_path,
+            "c-box-thread",
+            origin="git@github.com:acme/widgets.git",
+            issue=15,
+            box={"enabled": True, "start": False, "personas_dir": str(personas_dir)},
+        )
+
+        report = launch(config)
+        argv = report["conductor_argv"]
+
+        assert self._input_val(argv, "commit_dry_run") == "false"
+        assert self._input_val(argv, "push_dry_run") == "false"
+        assert self._input_val(argv, "notify_dry_run") == "false"
+        assert self._input_val(argv, "notify_repo") == "acme/widgets"
+        assert self._input_val(argv, "notify_issue") == "15"
+
+    def test_box_tier_without_issue_keeps_notify_dry_run_default(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "registry"))
+        personas_dir = write_personas(tmp_path / "personas")
+        config = self._config(
+            tmp_path,
+            "c-box-no-issue",
+            origin="git@github.com:acme/widgets.git",
+            box={"enabled": True, "start": False, "personas_dir": str(personas_dir)},
+        )
+
+        report = launch(config)
+        argv = report["conductor_argv"]
+
+        # push still flips false (branch publish is repo-agnostic), but the
+        # checklist mirror stays dry-run without a resolved issue target.
+        assert self._input_val(argv, "push_dry_run") == "false"
+        assert self._input_val(argv, "notify_dry_run") is None
+        assert self._input_val(argv, "notify_issue") is None
+
+    def test_payload_repo_gh_override_wins_over_derivation(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "registry"))
+        config = self._config(
+            tmp_path,
+            "c-override",
+            origin="git@github.com:acme/widgets.git",
+            repo_gh="fork-owner/mirror",
+        )
+
+        report = launch(config)
+        argv = report["conductor_argv"]
+
+        assert self._input_val(argv, "notify_repo") == "fork-owner/mirror"
+        entry = obs_registry.load_entry("repo", "c-override")
+        assert entry is not None
+        assert entry["repo_gh"] == "fork-owner/mirror"
+
+    def test_absent_origin_yields_no_notify_repo_and_null_fact(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "registry"))
+        config = self._config(tmp_path, "c-no-origin")  # no origin remote added
+
+        report = launch(config)
+        argv = report["conductor_argv"]
+
+        assert self._input_val(argv, "notify_repo") is None
+        # branch is still threaded (a fact independent of the remote).
+        assert self._input_val(argv, "branch") == "change/c-no-origin"
+        entry = obs_registry.load_entry("repo", "c-no-origin")
+        assert entry is not None
+        assert entry["repo_gh"] is None
 
 
 # ---------------------------------------------------------------------------

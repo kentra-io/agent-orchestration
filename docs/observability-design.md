@@ -184,6 +184,14 @@ Label taxonomy: `needs-human-input` (existing; remedy = fix plan, approve,
 resume) vs `run-died` (new; remedy = fix infra, resume). Different remedy,
 different label.
 
+> **Status — shipped** by the `github-mirror` change
+> (`openspec/changes/015-github-mirror/`): all four outward flows (milestone
+> push + edited-in-place checklist tick, daemon start/resume/finish/death,
+> close-on-archive) plus the `run-died` label are implemented. The mirror is
+> **advisory — when GitHub and local state disagree, local state wins (D10)**;
+> the issue-mirror reading guide lives in the `orchestration-monitor` and
+> `orchestration-launch` skills.
+
 ## 6. Daemon container
 
 One image (`agent-orchestration-daemon`), `--restart=always`, host-created (so

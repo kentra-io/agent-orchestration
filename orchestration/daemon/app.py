@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
+from orchestration.daemon import github_mirror
 from orchestration.daemon.ports import PortAllocator, parse_range
 from orchestration.daemon.resume import ResumeError
 from orchestration.daemon.resume import resume as _resume_fn
@@ -27,6 +28,34 @@ from orchestration.obs import registry
 from orchestration.obs.status import collect, derive_state
 
 POLL_INTERVAL_S = 2.0
+
+
+def _mirror_started_safe(slug: str, change_id: str, resumed: bool) -> None:
+    """Post the run-started/-resumed comment, never letting a mirror error
+    surface into the request handler (every GitHub write is best effort)."""
+    try:
+        entry = registry.load_entry(slug, change_id)
+        if entry is not None:
+            github_mirror.mirror_started(entry, resumed=resumed)
+    except Exception:  # noqa: BLE001 - a mirror failure must never fail the launch/resume
+        pass
+
+
+def _mirror_terminal_events(events: list[dict[str, Any]]) -> None:
+    """Hand supervision terminal events to the mirror, never letting a mirror
+    error kill the poll loop (design D5: best-effort, independent)."""
+    for event in events:
+        try:
+            entry = registry.load_entry(event["slug"], event["change_id"])
+            if entry is not None:
+                github_mirror.mirror_terminal(entry, event)
+        except Exception:  # noqa: BLE001 - never let a mirror error kill the loop
+            pass
+
+
+def _poll_and_mirror(supervisor: Supervisor) -> None:
+    events = supervisor.poll_once() + supervisor.reconcile()
+    _mirror_terminal_events(events)
 
 
 def _folded_runs() -> list[dict[str, Any]]:
@@ -48,8 +77,7 @@ def create_app(supervisor: Supervisor, token: str | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         async def loop() -> None:
             while True:
-                supervisor.poll_once()
-                supervisor.reconcile()
+                await run_in_threadpool(_poll_and_mirror, supervisor)
                 await asyncio.sleep(POLL_INTERVAL_S)
 
         task = asyncio.create_task(loop())
@@ -78,10 +106,10 @@ def create_app(supervisor: Supervisor, token: str | None = None) -> FastAPI:
         payload["conductor"] = conductor_cfg
         holder: dict[str, Any] = {}
         report = await run_in_threadpool(_launch_fn, payload, holder)
+        slug = registry.repo_slug(payload["repo"])
         if holder.get("proc") is not None:
-            supervisor.adopt(
-                registry.repo_slug(payload["repo"]), payload["change_id"], holder["proc"]
-            )
+            supervisor.adopt(slug, payload["change_id"], holder["proc"])
+            await run_in_threadpool(_mirror_started_safe, slug, payload["change_id"], False)
         return {"report": report}
 
     @app.post("/resume")
@@ -110,6 +138,7 @@ def create_app(supervisor: Supervisor, token: str | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if holder.get("proc") is not None:
             supervisor.adopt(slug, change_id, holder["proc"])
+            await run_in_threadpool(_mirror_started_safe, slug, change_id, True)
         return {"report": report}
 
     @app.get("/", response_class=HTMLResponse)

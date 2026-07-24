@@ -342,7 +342,11 @@ class TestGuidanceReachesNextAttempt:
         )
         started = _agent_names(events, "agent_started")
         # implementer(1) -> gates -> verifier(1, fail) -> counter -> orchestrator -> implementer(2)
-        # ... -> verifier(2, pass) -> commit (dry-run milestone commit on the pass path)
+        # ... -> verifier(2, pass) -> commit -> push -> tick
+        # (dry-run milestone commit on the pass path, then the best-effort
+        # mirror legs: push the run branch and tick the checklist comment;
+        # both are unconditional report-only script steps, so each emits its
+        # own agent_started event without ever failing the milestone).
         assert started == [
             "implementer",
             "gates",
@@ -353,6 +357,8 @@ class TestGuidanceReachesNextAttempt:
             "gates",
             "verifier",
             "commit",
+            "push",
+            "tick",
         ]
 
     def test_implementer_prompt_template_interpolates_orchestrator_guidance(self) -> None:

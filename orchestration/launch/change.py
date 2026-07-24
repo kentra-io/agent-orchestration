@@ -43,6 +43,9 @@ Input JSON:
       "repo": str,                    # required, abs path to the git repo/module root
       "change_id": str,               # required, the spec-lifecycle change id
       "branch": str,                  # optional, default "change/<change_id>"
+      "issue": int,                   # optional, the change's source-tracking issue number
+      "repo_gh": str,                 # optional, "owner/repo" for the GitHub mirror;
+                                      #   overrides derivation from the repo's origin remote
       "worktree_root": str,           # optional, default "<repo>/.worktrees"
       "box": {
         "enabled": bool,              # default false -- hermetic runs are boxless (--provider stub)
@@ -86,6 +89,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -120,6 +124,59 @@ PERSONA_ROLES = ("implementer", "verifier", "orchestrator")
 
 class ChangeLaunchError(ValueError):
     """The launcher's input is malformed, or a launch step failed to run at all."""
+
+
+# ---------------------------------------------------------------------------
+# owner/repo derivation for the GitHub mirror (D9)
+# ---------------------------------------------------------------------------
+
+
+def _parse_owner_repo(url: str) -> str | None:
+    """Parse `owner/repo` out of a git remote URL (SSH + HTTPS forms).
+
+    Handles the SCP-like `git@github.com:owner/repo(.git)` and the URL form
+    `scheme://[user@]host/owner/repo(.git)`. Returns None when the URL is
+    empty or does not carry at least an `owner/repo` tail.
+    """
+    url = url.strip()
+    if not url:
+        return None
+    scp = re.match(r"^[\w.+-]+@[\w.-]+:(?P<path>.+)$", url)
+    if scp:
+        path = scp.group("path")
+    else:
+        urlform = re.match(r"^[a-zA-Z][\w+.-]*://[^/]+/(?P<path>.+)$", url)
+        if not urlform:
+            return None
+        path = urlform.group("path")
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    return f"{parts[-2]}/{parts[-1]}"
+
+
+def derive_repo_gh(repo: str | Path, *, remote: str = "origin") -> str | None:
+    """Derive `owner/repo` from `git -C <repo> remote get-url <remote>`.
+
+    Returns None when the repo has no such remote, the URL is unparseable, or
+    git could not run — the mirror simply stays repo-less (writes degrade to
+    best-effort no-ops), never a launch failure.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "remote", "get-url", remote],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return _parse_owner_repo(proc.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +609,12 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
     tmpdir = Path(conductor_cfg.get("tmpdir") or (worktree / ".conductor-tmp"))
     tmpdir.mkdir(parents=True, exist_ok=True)
 
+    # owner/repo for the GitHub mirror (D9): an explicit payload override wins
+    # over derivation from the repo's `origin` remote; None when underivable
+    # (the mirror then degrades to best-effort no-ops, never a launch failure).
+    issue = payload.get("issue")
+    repo_gh = payload.get("repo_gh") or derive_repo_gh(repo_path)
+
     registry_entry = obs_registry.new_entry(
         repo=str(repo_path),
         change_id=change_id,
@@ -559,9 +622,10 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         branch=branch,
         box=box_report.get("name"),
         tmpdir=str(tmpdir),
-        issue=payload.get("issue"),
+        issue=issue,
         provider=conductor_cfg.get("provider"),
         conductor_env=conductor_cfg.get("env") or {},
+        repo_gh=repo_gh,
     )
     obs_registry.write_entry(registry_entry)
 
@@ -576,15 +640,32 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
     inputs = dict(conductor_cfg.get("inputs") or {})
     inputs.setdefault("plan_fixture_path", str(plan_fixture_path))
     inputs.setdefault("change_id", change_id)
+    # Mirror facts (D9): the run branch and the resolved repo/issue identity
+    # are threaded unconditionally (they are facts, not tier flags) so the
+    # workflow-side push/tick steps can publish the branch and render the
+    # checklist. The dry-run flags below gate whether any real git/gh call is
+    # made -- the stub tier leaves them defaulted true.
+    inputs.setdefault("branch", branch)
+    if repo_gh:
+        inputs.setdefault("notify_repo", repo_gh)
+    if issue is not None:
+        inputs.setdefault("notify_issue", str(issue))
     if box_enabled:
         inputs.setdefault("worktree", str(worktree))
         if box_report.get("name"):
             inputs.setdefault("box", box_report["name"])
         # Production tier: persist every verified milestone as a commit
-        # (orchestration.launch.milestone_commit) -- the durability finish.
-        # The hermetic tier keeps the workflow default (dry-run) so stub
-        # runs never commit into a checkout.
+        # (orchestration.launch.milestone_commit) -- the durability finish --
+        # and publish it to the run branch (milestone_push). The hermetic tier
+        # keeps the workflow defaults (dry-run) so stub runs never commit into
+        # a checkout or touch the network.
         inputs.setdefault("commit_dry_run", "false")
+        inputs.setdefault("push_dry_run", "false")
+        # The checklist mirror's real `gh` write is enabled only when both the
+        # repo and issue are resolved; otherwise it stays dry-run (best-effort
+        # no-op) rather than erroring on a missing target.
+        if repo_gh and issue is not None:
+            inputs.setdefault("notify_dry_run", "false")
 
     argv = build_conductor_argv(
         conductor_bin=_conductor_bin(conductor_cfg.get("conductor_bin")),

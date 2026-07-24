@@ -41,10 +41,12 @@ def new_entry(
     issue: int | None = None,
     provider: str | None = None,
     conductor_env: dict[str, str] | None = None,
+    repo_gh: str | None = None,
 ) -> dict[str, Any]:
     return {
         "repo_slug": repo_slug(repo),
         "repo": str(repo),
+        "repo_gh": repo_gh,
         "change_id": change_id,
         "worktree": worktree,
         "branch": branch,

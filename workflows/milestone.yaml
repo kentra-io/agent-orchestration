@@ -164,11 +164,48 @@ workflow:
     notify_repo:
       type: string
       required: false
-      description: '"owner/repo" for the escalate step''s GitHub-label mirror (live tier only).'
+      description: >-
+        "owner/repo" for the escalate step's GitHub-label mirror AND the
+        `tick` step's checklist-comment mirror (live tier only). Forwarded by
+        execute-change.yaml's milestone_step input_mapping; derived by the
+        launcher from the repo's `origin` remote (payload `repo_gh` override
+        wins). Absent (hermetic) it renders as "" and no `gh` call is made.
     notify_issue:
       type: number
       required: false
-      description: Issue number for the escalate step's GitHub-label mirror (live tier only).
+      description: >-
+        Issue number for the escalate step's GitHub-label mirror AND the
+        `tick` step's checklist-comment mirror (live tier only). Forwarded by
+        execute-change.yaml's milestone_step input_mapping.
+    branch:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        The run's named branch (default `change/<change_id>`, supplied by the
+        launcher). The `push` step publishes the milestone commit to this
+        branch on the remote; the `tick` step names it in the checklist
+        header. Left "" for a standalone stub run of this workflow.
+    push_dry_run:
+      type: boolean
+      required: false
+      default: true
+      description: >-
+        Skip the real `git push` in the `push` step (hermetic default — the
+        stub tier exercises the push path with no network, no git call, no
+        token). The launcher flips this to false for the production (box)
+        tier, alongside commit_dry_run, so every committed milestone is
+        published to the run branch. See `orchestration.launch.milestone_push`.
+    milestone_manifest:
+      type: string
+      required: false
+      default: ""
+      description: >-
+        JSON-encoded list of the run's milestones ({id, title}) the `tick`
+        step renders the checklist from — forwarded by execute-change.yaml as
+        `read_plan.output.milestones | tojson` (the same JSON-string idiom as
+        `commit_paths`). Empty ("") in a standalone stub run renders an empty
+        checklist. See `orchestration.launch.milestone_tick`.
 
   limits:
     # 3 attempts * 3 provider/script steps (implementer/gates/verifier) + 2
@@ -325,7 +362,11 @@ agents:
       "dry_run": workflow.input.commit_dry_run,
       "paths": workflow.input.commit_paths} | tojson }}
     routes:
-      - to: "$end"
+      # A successful (or dry-run) commit hands off to the best-effort mirror
+      # legs (push -> tick); a non-zero commit exit still routes LOUDLY to
+      # `commit_failed` (unchanged). The mirror legs cannot fail the milestone
+      # -- see `push`/`tick`'s unconditional routes below.
+      - to: push
         when: "{{ commit.output.exit_code == 0 }}"
       - to: commit_failed
 
@@ -344,6 +385,59 @@ agents:
       Milestone {{ workflow.input.milestone_id }} was verified but its
       commit step did not succeed (status={{ commit.output.status }}):
       {{ commit.output.reason }}
+
+  - name: push
+    type: script
+    description: >-
+      Best-effort branch publish (`orchestration.launch.milestone_push`) --
+      pushes the just-committed milestone to the run's named branch on the
+      remote, so the branch/commits a human sees on GitHub are the state of
+      the run (spec `github-mirror`: "Verified milestone commits are pushed
+      to the run branch"). Runs ONLY after a successful commit, but is itself
+      best effort: it routes UNCONDITIONALLY to `tick`, so a push failure
+      (remote outage, auth, non-fast-forward) is reported and annotated by
+      `tick`, never fails the milestone or halts the run (the same
+      escalate-step mechanism -- a script step's exit code is not
+      self-enforcing; routing is). Never `--force`. Hermetic default is
+      dry-run (`push_dry_run: true`) -- no network, no git call, no token.
+    command: python3
+    args: ["-m", "orchestration.launch.milestone_push"]
+    stdin: >-
+      {{ {"worktree": workflow.input.worktree if workflow.input.worktree else ".",
+      "branch": workflow.input.branch,
+      "dry_run": workflow.input.push_dry_run} | tojson }}
+    routes:
+      - to: tick
+
+  - name: tick
+    type: script
+    description: >-
+      Best-effort checklist mirror (`orchestration.launch.milestone_tick`) --
+      creates-or-edits the single marker-keyed checklist comment on the
+      change's issue (spec `github-mirror`: "Milestone progress mirrored as
+      one edited-in-place checklist"). Runs UNCONDITIONALLY after `push`
+      (regardless of push outcome) and routes UNCONDITIONALLY to `$end`, so
+      it can never fail the milestone. It receives the `commit` status/sha and
+      the `push` status/exit/stderr so a failed push is annotated in the
+      checklist as completed-but-local-only -- recorded, never hidden. Like
+      the `escalate` step it defaults to a hermetic dry-run
+      (`notify_dry_run: true`) -- no `gh`, no network, no token.
+    command: python3
+    args: ["-m", "orchestration.launch.milestone_tick"]
+    stdin: >-
+      {{ {"change_id": workflow.input.change_id,
+      "branch": workflow.input.branch,
+      "milestone_manifest": workflow.input.milestone_manifest,
+      "milestone_id": workflow.input.milestone_id,
+      "commit": {"status": commit.output.status, "sha": commit.output.sha},
+      "push": {"status": push.output.status,
+      "git_exit_code": push.output.git_exit_code,
+      "git_stderr_tail": push.output.git_stderr_tail},
+      "repo": workflow.input.notify_repo,
+      "issue": workflow.input.notify_issue,
+      "dry_run": workflow.input.notify_dry_run} | tojson }}
+    routes:
+      - to: "$end"
 
   - name: counter
     type: set
@@ -438,6 +532,8 @@ output:
   l1_command: "{{ gates.output.report.l1.command if gates.output.report.l1 else none }}"
   commit_status: "{{ commit.output.status if commit is defined else '' }}"
   commit_sha: "{{ commit.output.sha if commit is defined else '' }}"
+  push_status: "{{ push.output.status if push is defined else '' }}"
+  mirror_mode: "{{ tick.output.status if tick is defined else '' }}"
   attempts: "{{ counter.output.attempts if counter is defined else 0 }}"
   escalated: "{{ true if human_gate is defined else false }}"
   escalation_label: "{{ escalate.output.label if escalate is defined else '' }}"

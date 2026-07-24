@@ -37,6 +37,15 @@ one; the loop itself lands over the following milestones.** See
 and [`implementation-plan.md`](./implementation-plan.md) for the milestone
 plan and locked decisions.
 
+The durable **GitHub-issue mirror** — per-milestone branch push + an
+edited-in-place checklist, daemon start/resume/finish/death comments with the
+`run-died` label, and close-on-archive — ships via the `github-mirror`
+capability (`openspec/changes/015-github-mirror/specs/github-mirror/spec.md`;
+design in [`docs/observability-design.md`](./docs/observability-design.md)
+§5.4). The mirror is **advisory: when GitHub and local state disagree, local
+state wins** — read it via the `orchestration-monitor` /
+`orchestration-launch` skills' issue-mirror guides.
+
 ## Install the CLI
 
 ```bash

@@ -144,6 +144,112 @@ def test_resume_calls_resumer_and_adopts(tmp_path, monkeypatch):
     assert 42020 <= seen["web_port"] <= 42030
 
 
+def _mirrorable_entry(tmp_path, change_id="1-a"):
+    e = registry.new_entry(
+        repo="/r/proj",
+        change_id=change_id,
+        worktree=str(tmp_path),
+        branch="change/1-a",
+        box="box",
+        tmpdir=str(tmp_path),
+        issue=7,
+        repo_gh="kentra-io/proj",
+    )
+    registry.write_entry(e)
+    registry.append_incarnation(
+        "proj",
+        change_id,
+        {"pid": 1, "started_at": "x", "web_port": None, "exit_code": None, "classified": None},
+    )
+
+
+def _install_fake_client(monkeypatch):
+    calls = {"comment": [], "add_label": [], "ensure_label": []}
+    monkeypatch.setattr(
+        app_mod.github_mirror,
+        "comment",
+        lambda repo, issue, body: calls["comment"].append(body) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        app_mod.github_mirror,
+        "add_label",
+        lambda repo, issue, label: calls["add_label"].append(label) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        app_mod.github_mirror,
+        "ensure_label",
+        lambda repo, label: calls["ensure_label"].append(label) or {"ok": True},
+    )
+    return calls
+
+
+def test_launch_posts_started_comment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    monkeypatch.setenv("ORCHESTRATION_WEB_PORT_RANGE", "42020-42030")
+    calls = _install_fake_client(monkeypatch)
+
+    def fake_launch(payload, proc_holder=None):
+        _mirrorable_entry(tmp_path, payload["change_id"])
+        proc_holder["proc"] = object()
+        return {"pid": 123}
+
+    monkeypatch.setattr(app_mod, "_launch_fn", fake_launch)
+    c = _client(token="sekrit")
+    r = c.post("/launch", json={"repo": "/r/proj", "change_id": "1-a"}, headers=AUTH)
+    assert r.status_code == 200
+    assert len(calls["comment"]) == 1 and "started" in calls["comment"][0]
+
+
+def test_terminal_success_posts_finished(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    _mirrorable_entry(tmp_path)
+    calls = _install_fake_client(monkeypatch)
+    app_mod._mirror_terminal_events(
+        [{"slug": "proj", "change_id": "1-a", "classified": "success", "detail": ""}]
+    )
+    assert len(calls["comment"]) == 1 and "finished" in calls["comment"][0]
+    assert calls["add_label"] == []
+
+
+def test_terminal_death_labels_and_comments(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    _mirrorable_entry(tmp_path)
+    calls = _install_fake_client(monkeypatch)
+    app_mod._mirror_terminal_events(
+        [
+            {
+                "slug": "proj",
+                "change_id": "1-a",
+                "classified": "unknown",
+                "remedy": None,
+                "detail": "the real error tail",
+            }
+        ]
+    )
+    assert calls["add_label"] == ["run-died"]
+    assert "the real error tail" in calls["comment"][0]
+
+
+def test_terminal_gate_pause_is_silent(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    _mirrorable_entry(tmp_path)
+    calls = _install_fake_client(monkeypatch)
+    app_mod._mirror_terminal_events(
+        [{"slug": "proj", "change_id": "1-a", "classified": "gate-pause", "detail": "EOF"}]
+    )
+    assert calls["comment"] == [] and calls["add_label"] == []
+
+
+def test_reconcile_after_restart_no_double_post(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    _mirrorable_entry(tmp_path)
+    calls = _install_fake_client(monkeypatch)
+    event = {"slug": "proj", "change_id": "1-a", "classified": "api-transient", "detail": "boom"}
+    app_mod._mirror_terminal_events([event])  # first observation
+    app_mod._mirror_terminal_events([event])  # daemon restart / later reconcile pass
+    assert len(calls["comment"]) == 1 and len(calls["add_label"]) == 1
+
+
 def test_index_serves_html(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
     r = _client().get("/")

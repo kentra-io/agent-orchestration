@@ -67,3 +67,44 @@ daemon re-derives remaining milestones from the CURRENT plan — completed
 milestone ids are never re-run. After fixing the cause (`cb login`, plan edit
 + approval), resume from the target repo (not necessarily the worktree — the
 daemon resumes the change's existing worktree itself).
+
+## The issue mirror (what a launch/resume posts)
+
+**The mirror is a best-effort projection; when GitHub and local state
+disagree, local state wins.** The issue is a read-only projection of local
+state (the registry / `orch status`, the run branch, the change folder) —
+never the source of truth, never synced back.
+
+A launch/resume drives these writes to the change's issue:
+
+- **On launch** — the daemon posts a run-**started** comment (a **resumed**
+  variant on `orch resume`) after it adopts the run.
+- **Per milestone** — the workflow **pushes** the milestone commit to the run
+  branch and edits a single **checklist** comment in place (one checkbox per
+  milestone). A push that fails is annotated `(local-only: push failed — …)`,
+  never silently presented as being on GitHub.
+- **On finish** — a run-**finished** comment on a `success` exit; a
+  **death** comment + the `run-died` label on a death classification.
+- **On archive** — the archive hand-off **closes** the issue.
+
+### Which flags gate the writes
+
+Every mirror write defaults to a hermetic `dry_run` that performs no `gh`
+call, no network I/O, and needs no token — so the Stub tier exercises the
+path without writing. The **real** writes happen only in the production (box)
+tier and only when a **repo and issue are resolved**: the launcher derives
+`owner/repo` from the repo's `origin` remote (an explicit `repo_gh` payload
+field wins), threads `notify_repo`/`notify_issue`/`branch`, and flips
+`push_dry_run`/`commit_dry_run`/`notify_dry_run` false. Pass `--issue N` /
+`--branch B` to bind them; without a resolved repo+issue the mirror stays
+dry-run and nothing is written.
+
+### Absent auth degrades to a logged failure (ADR-0005)
+
+GitHub side effects authenticate as the bot identity
+(`KENTRA_BOT_GH_TOKEN`), are independent best effort, and default to a
+hermetic dry-run. With no token or no reachability, each write is **attempted,
+its failure recorded, and never raised** — the run still completes on its
+local commits and reaches its normal terminal state. A quiet issue is a
+mirror failure, not a run failure; confirm the run itself via
+`orch status <change-id>`.
