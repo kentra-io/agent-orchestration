@@ -62,6 +62,8 @@ class Supervisor:
                     "change_id": change_id,
                     "exit_code": exit_code,
                     "classified": verdict.kind,
+                    "remedy": verdict.remedy,
+                    "detail": verdict.detail,
                 }
             )
             del self._procs[key]
@@ -95,6 +97,8 @@ class Supervisor:
                     "change_id": entry["change_id"],
                     "exit_code": None,
                     "classified": kind,
+                    "remedy": verdict.remedy,
+                    "detail": verdict.detail,
                 }
             )
         return events
