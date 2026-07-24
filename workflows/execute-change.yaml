@@ -322,12 +322,18 @@ agents:
       `lifecycle` on PATH and an `openspec/` tree at the worktree cwd.
       Exit-code contract (`orchestration.launch.archive_handoff`):
       0 archived, 1 refused (the gate's reason lands in `output.reason`,
-      never a crash), 2 error.
+      never a crash), 2 error. On a real "archived" outcome (notify live +
+      repo/issue present) it also best-effort closes the change's issue with
+      a closing comment (spec: "Archiving a change closes its issue") -- a
+      failed or skipped close never changes `status`/exit code.
     command: python3
     args: ["-m", "orchestration.launch.archive_handoff"]
     stdin: >-
       {{ {"worktree": ".", "change_id": workflow.input.change_id,
-      "dry_run": workflow.input.archive_dry_run} | tojson }}
+      "dry_run": workflow.input.archive_dry_run,
+      "notify_repo": workflow.input.notify_repo,
+      "notify_issue": workflow.input.notify_issue,
+      "notify_dry_run": workflow.input.notify_dry_run} | tojson }}
     routes:
       - to: "$end"
 

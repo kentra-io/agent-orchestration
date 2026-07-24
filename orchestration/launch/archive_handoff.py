@@ -24,7 +24,11 @@ Input JSON:
       "worktree": str,        # optional, default "." -- cwd to run `lifecycle` from
       "change_id": str,       # required when dry_run is false; optional (may be "") when true
       "dry_run": bool,        # optional, default true
-      "lifecycle_bin": str    # optional, default "lifecycle"
+      "lifecycle_bin": str,   # optional, default "lifecycle"
+      "notify_repo": str,     # optional -- "owner/repo" for the close-on-archive mirror
+      "notify_issue": int,    # optional -- issue number for the close-on-archive mirror
+      "notify_dry_run": bool  # optional, default true -- hermetic default; when true (or
+                              # repo/issue absent) no `gh` close is attempted
     }
 
 `dry_run` (default true -- the hermetic-tier default, wired as
@@ -51,8 +55,20 @@ routes on -- see there):
                                       # (status "archived" only)
       "reason": str | null,          # the gate's refusal reason / error message
                                       # (status "refused"/"error")
-      "would_run": [str, ...] | null # the argv that WOULD run (status "dry_run" only)
+      "would_run": [str, ...] | null,# the argv that WOULD run (status "dry_run" only)
+      "close_attempted": bool,       # whether a close-on-archive `gh` call was attempted
+      "closed": bool,                # whether that close succeeded
+      "gh_exit_code": int | null,    # the `gh issue close` exit code (null if not attempted)
+      "gh_stderr_tail": str | null   # a tail of the `gh` stderr on failure (null otherwise)
     }
+
+Close-on-archive (spec: "Archiving a change closes its issue") is a
+**best-effort annotation, never a verdict change**: only a real "archived"
+outcome with `notify_dry_run` false and both `notify_repo`/`notify_issue`
+present attempts a `gh issue close` (via the shared
+`orchestration.daemon.github_mirror` client -- check=False, never raises).
+A failed close still exits 0 with status "archived"; "refused"/"error"/
+"dry_run" outcomes never attempt a close.
 
 Process exit code: 0 for "dry_run"/"archived" (this script ran to
 completion and reports a real outcome), 1 for "refused" (the gate did its
@@ -71,6 +87,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from orchestration.daemon import github_mirror
 from orchestration.harness.common import coerce_bool
 
 EXIT_GOOD = 0
@@ -128,6 +145,47 @@ def _emit(verdict: dict[str, Any]) -> None:
     print(json.dumps(verdict, indent=2, sort_keys=True))
 
 
+def _close_defaults() -> dict[str, Any]:
+    """The close-on-archive fields, defaulted to a no-attempt outcome. Present on
+    every verdict so the output shape is uniform; only a real "archived" outcome
+    overwrites them (see `_attempt_close`)."""
+    return {
+        "close_attempted": False,
+        "closed": False,
+        "gh_exit_code": None,
+        "gh_stderr_tail": None,
+    }
+
+
+def _closing_comment(change_id: str) -> str:
+    return (
+        f"📦 Change `{change_id}` archived — folded into the living spec and "
+        f"relocated to `openspec/changes/archive/{change_id}/`.\n\n"
+        "_Closed by the agent-orchestration archive hand-off. Local state is the "
+        f"source of truth; run `orch status {change_id}` for the authoritative view._"
+    )
+
+
+def _attempt_close(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort `gh issue close`, only when notify is live and repo+issue are
+    both present. Returns the close fields to merge onto an "archived" verdict --
+    NEVER raises, NEVER changes status/exit code (a failed close still archives)."""
+    fields = _close_defaults()
+    notify_dry_run = coerce_bool(payload.get("notify_dry_run", True), default=True)
+    repo = payload.get("notify_repo") or ""
+    issue = payload.get("notify_issue")
+    issue_ok = isinstance(issue, int) and not isinstance(issue, bool)
+    if notify_dry_run or not repo or not issue_ok:
+        return fields
+
+    result = github_mirror.close_issue(repo, issue, _closing_comment(change_id))
+    fields["close_attempted"] = True
+    fields["closed"] = bool(result.get("ok"))
+    fields["gh_exit_code"] = result.get("gh_exit_code")
+    fields["gh_stderr_tail"] = result.get("gh_stderr_tail")
+    return fields
+
+
 def archive(payload: dict[str, Any]) -> dict[str, Any]:
     worktree = payload.get("worktree") or "."
     change_id = payload.get("change_id") or ""
@@ -150,6 +208,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
             "result": None,
             "reason": None,
             "would_run": argv,
+            **_close_defaults(),
         }
 
     try:
@@ -169,6 +228,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
             "result": None,
             "reason": f"could not run `{' '.join(argv)}`: {exc}",
             "would_run": None,
+            **_close_defaults(),
         }
 
     if proc.returncode == LIFECYCLE_EXIT_OK:
@@ -183,6 +243,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
                 "result": None,
                 "reason": f"`lifecycle archive` exited 0 but printed non-JSON stdout: {exc}",
                 "would_run": None,
+                **_close_defaults(),
             }
         return {
             "status": "archived",
@@ -192,6 +253,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
             "result": result,
             "reason": None,
             "would_run": None,
+            **_attempt_close(change_id, payload),
         }
 
     if proc.returncode == LIFECYCLE_EXIT_REFUSED:
@@ -203,6 +265,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
             "result": None,
             "reason": proc.stderr.strip() or proc.stdout.strip(),
             "would_run": None,
+            **_close_defaults(),
         }
 
     return {
@@ -213,6 +276,7 @@ def archive(payload: dict[str, Any]) -> dict[str, Any]:
         "result": None,
         "reason": proc.stderr.strip() or proc.stdout.strip(),
         "would_run": None,
+        **_close_defaults(),
     }
 
 
