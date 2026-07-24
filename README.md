@@ -74,9 +74,11 @@ the same repository**. Not supported:
 - a change **spanning two repos**, or a multi-module project whose modules have
   **separate git roots**.
 
-These must be split by hand (drive the part that lives in one repo, do the rest
-manually). See [#24](https://github.com/kentra-io/agent-orchestration/issues/24)
-and `orchestration.md` §1 / §13.
+This is a **committed design constraint** (ADR-0004), not a roadmap gap:
+split such changes by hand (create the repo first, plan inside it; drive the
+part that lives in one repo, do the rest manually). See
+[#24](https://github.com/kentra-io/agent-orchestration/issues/24) (closed as
+by-design) and `orchestration.md` §1 / §13.
 
 ## Wiring a consuming project's boxes to the daemon
 
