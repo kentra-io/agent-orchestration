@@ -2,6 +2,20 @@
   "generatedAt": "2026-07-24T13:39:42Z",
   "constitutionHash": "sha256:d48b0fc0b95d8c4092b02f802abd0714051dd7e67fc8ec232746a246294c2f8c",
   "plan": "openspec/changes/015-github-mirror/tasks.md",
-  "deviations": [],
-  "summary": {"critical": 0, "high": 0, "medium": 0, "low": 0}
+  "deviations": [
+    {
+      "id": "M3-DEV-01",
+      "taskId": "Milestone 3, Step 1 (milestone.yaml: add push + tick steps, rewire commit --exit_code==0--> push --always--> tick --always--> $end)",
+      "specSection": "specs/github-mirror/spec.md — 'Verified milestone commits are pushed to the run branch' and 'Milestone progress mirrored as one edited-in-place checklist' (design.md D2 report-only routing)",
+      "status": "RESOLVED",
+      "resolution": "Orchestrator resolution guidance (post attempt 1) authorized treating tests/test_workflows_ladder.py as in-path for this single assertion edit. Applied exactly as described in intendToDo: appended 'push','tick' to the test_orchestrator_runs_between_the_two_implementer_calls expected agent_started sequence. No other change to that file; all M3 production diffs unchanged.",
+      "severity": "low",
+      "planSaid": "The M3 validation contract fixes a closed path-set (paths:) that does NOT include tests/test_workflows_ladder.py, and its criteria states 'All pre-existing workflow tests stay green (routing/outputs for the ladder, flatten, and commit_failed paths unchanged).' Step 6 lists golden-expectation refreshes only for tests/test_workflows_stub.py and tests/test_cli_payloads.py. The check command nonetheless runs tests/test_workflows_ladder.py and requires it to pass.",
+      "intendToDo": "Update exactly one frozen assertion — tests/test_workflows_ladder.py::TestGuidanceReachesNextAttempt::test_orchestrator_runs_between_the_two_implementer_calls — whose exact-match agent_started sequence currently ends at 'commit'. Append 'push' and 'tick' to the expected list so it reads [implementer, gates, verifier, counter, orchestrator, implementer, gates, verifier, commit, push, tick]. No other change to that file.",
+      "why": "The mandated push and tick steps are Conductor script steps; every executed step (script steps included) emits an 'agent_started' event (conductor/engine/workflow.py ~3077). On the pass path commit exits 0 and now routes commit->push->tick->$end, so both steps run and legitimately emit two additional agent_started events. The pre-existing exact-sequence assertion therefore cannot pass. The ladder's routing/semantics/outputs are otherwise unchanged (the milestone still advances, does not escalate); only the observed step-start sequence grew by the two new best-effort mirror legs. The plan's path-set and step-6 refresh list overlooked this specific golden.",
+      "blastRadius": "One test file outside the declared path-set (tests/test_workflows_ladder.py), one test method, one list-equality assertion. No production code, no other test, and no ladder behavior is affected. All other tests in the M3 check command already pass with the in-path-set changes; the only other red test (test_launch_change.py::test_resolve_plan_shells_out_to_real_lifecycle_apply) is a pre-existing environmental failure (no `lifecycle` binary in this sandbox), independent of this change.",
+      "alternativesRejected": "There is no way to keep the mandated commit->push->tick routing while preventing push/tick from emitting agent_started (engine behavior). Guarding push/tick behind exit-code routes would violate the spec's best-effort/independent requirement (design.md D2). Leaving the assertion red would fail the milestone's own check command."
+    }
+  ],
+  "summary": {"critical": 0, "high": 0, "medium": 0, "low": 1}
 }
