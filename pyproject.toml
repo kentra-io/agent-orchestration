@@ -12,6 +12,7 @@ dependencies = [
     # Already present transitively via conductor-cli's own deps -- pinned
     # explicitly here since we import it ourselves, not just inherit it.
     "mcp>=1.28.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

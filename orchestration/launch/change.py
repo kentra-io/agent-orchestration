@@ -95,6 +95,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from orchestration.launch.checkpoint_env import (
     persistent_checkpoint_env,
     persistent_checkpoint_subprocess_env,
@@ -205,7 +207,14 @@ def materialize_box(worktree: str | Path, personas_dir: str | Path | None = None
     - `<worktree>/.claude/agents/<role>.md` — the cast personas, copied from
       `personas_dir` (default `<repo>/personas`).
     - `<worktree>/.claudebox/config.yaml` — `provisioning.claude_dir_source`
-      pointed at the absolute `.agent-claude` path.
+      pointed at the absolute `.agent-claude` path. If the file already
+      exists (a consuming project's own config, with its own `env:` /
+      `security:` / `resources:` etc.), it is parsed and only
+      `provisioning.claude_dir_source` is set/overwritten — every other
+      top-level key, and any other `provisioning` subkey, is preserved
+      (#27: this used to unconditionally overwrite the whole file with the
+      2-line stub, silently dropping the project's config). Malformed YAML
+      raises `ChangeLaunchError` rather than being clobbered.
 
     Returns `{"claude_dir_source": str, "personas": [names], "config_path": str}`.
     """
@@ -241,10 +250,37 @@ def materialize_box(worktree: str | Path, personas_dir: str | Path | None = None
     claudebox_dir = worktree / ".claudebox"
     claudebox_dir.mkdir(parents=True, exist_ok=True)
     config_path = claudebox_dir / "config.yaml"
-    config_path.write_text(
-        f"provisioning:\n  claude_dir_source: {agent_claude.resolve()}\n",
-        encoding="utf-8",
-    )
+    claude_dir_source = str(agent_claude.resolve())
+    if config_path.is_file():
+        # A consuming project's own config.yaml already exists (env: with
+        # tokens/git identity, security:, resources:, ...) -- merge into it
+        # rather than clobbering it (#27). YAML round-trip loses comments;
+        # accepted tradeoff for a correct, minimal merge.
+        try:
+            existing = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise ChangeLaunchError(
+                f"{config_path} is not valid YAML, refusing to overwrite it: {exc}"
+            ) from exc
+        existing = existing or {}
+        if not isinstance(existing, dict):
+            raise ChangeLaunchError(
+                f"{config_path} must parse to a YAML mapping, refusing to overwrite it "
+                f"(got {type(existing).__name__})"
+            )
+        provisioning = existing.setdefault("provisioning", {})
+        if not isinstance(provisioning, dict):
+            raise ChangeLaunchError(
+                f"{config_path}'s 'provisioning' key must be a mapping, refusing to "
+                f"overwrite it (got {type(provisioning).__name__})"
+            )
+        provisioning["claude_dir_source"] = claude_dir_source
+        config_path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
+    else:
+        config_path.write_text(
+            f"provisioning:\n  claude_dir_source: {claude_dir_source}\n",
+            encoding="utf-8",
+        )
 
     return {
         "claude_dir_source": str(agent_claude.resolve()),
