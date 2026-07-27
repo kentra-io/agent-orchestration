@@ -471,13 +471,14 @@ def test_resume_in_place_heals_checkpoint_missing_branch(monkeypatch, tmp_path):
 def test_resume_in_place_uses_original_checkpoint_when_inputs_complete(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2]}))
-    ckpt = _ckpt(
-        tmp_path,
-        fixture,
-        [M1, M2],
-        cursor=1,
-        raw_inputs={"change_id": "1-a", "branch": "change/1-a"},
-    )
+    # "Complete" = the workflow's full declared input surface — resume-in-place
+    # backfills declared defaults too (notify_repo/notify_issue have none and
+    # killed a live run), so only a checkpoint carrying every declared input
+    # skips the heal copy.
+    declared = dr._declared_input_defaults(dr.MODULE_ROOT / "workflows" / "execute-change.yaml")
+    full_inputs = dict.fromkeys(declared, "x")
+    full_inputs.update({"change_id": "1-a", "branch": "change/1-a"})
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1, raw_inputs=full_inputs)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
     entry = _entry(tmp_path, branch="change/1-a")
 
@@ -488,3 +489,43 @@ def test_resume_in_place_uses_original_checkpoint_when_inputs_complete(monkeypat
     from_path = Path(argv[argv.index("--from") + 1])
     assert from_path == ckpt.file_path
     assert report["healed_checkpoint"] is None
+
+
+def test_declared_input_defaults_covers_full_surface():
+    defaults = dr._declared_input_defaults(dr.MODULE_ROOT / "workflows" / "execute-change.yaml")
+    # No-default declarations fall back to "" (the live notify_repo death).
+    assert defaults["notify_repo"] == ""
+    assert defaults["notify_issue"] == ""
+    # Declared defaults come through natively.
+    assert defaults["attempt_threshold"] == 3
+    assert defaults["notify_dry_run"] is True
+    assert defaults["branch"] == ""
+
+
+def test_resume_in_place_heals_declared_inputs_without_registry_facts(monkeypatch, tmp_path):
+    """A pre-github-mirror checkpoint + an old entry with no repo_gh/issue:
+    the launch-parity set can't supply notify_repo, so the declared-default
+    floor must (live 007 death #4)."""
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2]}))
+    ckpt = _ckpt(
+        tmp_path,
+        fixture,
+        [M1, M2],
+        cursor=1,
+        raw_inputs={"change_id": "1-a", "branch": "change/1-a"},
+    )
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
+    entry = _entry(tmp_path, branch="change/1-a")
+
+    dr.resume(entry, web_port=42032)
+
+    argv = spawned["argv"]
+    from_path = Path(argv[argv.index("--from") + 1])
+    assert from_path.name.startswith("healed-")
+    healed = json.loads(from_path.read_text())
+    assert healed["inputs"]["notify_repo"] == ""
+    assert healed["inputs"]["notify_issue"] == ""
+    assert healed["context"]["workflow_inputs"]["notify_repo"] == ""
+    # checkpoint's own values still win
+    assert healed["inputs"]["change_id"] == "1-a"

@@ -169,6 +169,26 @@ def _workflow_inputs(entry: dict[str, Any], change_id: str, worktree: str) -> di
     return inputs
 
 
+def _declared_input_defaults(workflow_path: str | Path) -> dict[str, Any]:
+    """Every input the workflow declares, mapped to its declared default
+    (or `""` when it declares none — e.g. `notify_repo`/`notify_issue`,
+    `required: false` with no `default:`).
+
+    Resume-in-place renders templates against checkpoint-restored inputs
+    only; the engine never re-applies workflow defaults on that path (live
+    proof: a pre-github-mirror checkpoint died on
+    `{{ workflow.input.notify_repo }}` even after the launch-parity heal,
+    because `notify_repo` is derivable from no registry fact on old
+    entries). Backfilling the declared surface guarantees every
+    `workflow.input.*` reference renders.
+    """
+    import yaml
+
+    doc = yaml.safe_load(Path(workflow_path).read_text())
+    declared = ((doc or {}).get("workflow") or {}).get("input") or {}
+    return {name: (spec or {}).get("default", "") for name, spec in declared.items()}
+
+
 def heal_checkpoint_inputs(ckpt_path: Path, out_dir: Path, inputs: dict[str, str]) -> Path:
     """Backfill a resume-in-place checkpoint's missing workflow inputs.
 
@@ -253,9 +273,13 @@ def resume(
     healed_ckpt_path = ckpt_path
     if remaining == ckpt.milestones[ckpt.cursor_index :]:
         mode = "resume-in-place"
-        healed_ckpt_path = heal_checkpoint_inputs(
-            ckpt_path, tmpdir, _workflow_inputs(entry, change_id, worktree)
-        )
+        # Declared-default floor first, launch-parity facts on top; the
+        # checkpoint's own values always win inside the healer.
+        heal_inputs = {
+            **_declared_input_defaults(workflow),
+            **_workflow_inputs(entry, change_id, worktree),
+        }
+        healed_ckpt_path = heal_checkpoint_inputs(ckpt_path, tmpdir, heal_inputs)
         argv = [
             conductor_bin,
             "--silent",
