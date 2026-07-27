@@ -496,6 +496,25 @@ class TestLaunchDryRun:
         assert str(EXECUTE_CHANGE_WORKFLOW) in report["conductor_argv"]
         assert Path(report["plan_fixture_path"]).is_file()
 
+    def test_default_tmpdir_is_registry_run_dir(self, tmp_path: Path, monkeypatch) -> None:
+        """P4/telemetry-durability regression: with no explicit
+        `conductor.tmpdir`, the default must be the change-keyed registry run
+        dir (`~/.agent-orchestration/runs/<slug>--<change_id>/conductor`), NOT
+        `<worktree>/.conductor-tmp` -- the worktree is ephemeral (removed on
+        cleanup) while the registry dir is durable by construction.
+        """
+        registry_base = tmp_path / "registry"
+        monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(registry_base))
+        config = _base_config(tmp_path, "c-default-tmpdir", dry_run=True)
+
+        report = launch(config)
+
+        repo_dir = Path(config["repo"])
+        change_id = config["change_id"]
+        assert report["tmpdir"] == str(
+            registry_base / f"{repo_dir.name}--{change_id}" / "conductor"
+        )
+
     def test_caller_env_tmpdir_cannot_defeat_the_per_change_relocation(
         self, tmp_path: Path, monkeypatch
     ) -> None:
