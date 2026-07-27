@@ -5,6 +5,13 @@ difference is the token: the Makefile passes `-e ORCHESTRATION_DAEMON_TOKEN`
 (from the caller's shell), the CLI passes it BY VALUE from daemon.json so no
 manual export is ever needed. The Makefile stays the local-dev
 (build-from-checkout) path.
+
+`cmd_start` also reads the long-lived Claude token (`auth_cmd.read_token()` —
+env override, else the macOS keychain) and passes it BY VALUE too
+(`CLAUDE_CODE_LONG_LIVED_TOKEN`), since `orch daemon start` is the one
+host-side moment that can reach the keychain (harness issue #3). Refusing to
+start without it is deliberate: a daemon without it launches boxes that can't
+authenticate — the pre-fix failure mode, silently.
 """
 
 from __future__ import annotations
@@ -16,7 +23,7 @@ import sys
 from pathlib import Path
 
 from orchestration import client
-from orchestration.cli import config
+from orchestration.cli import auth_cmd, config
 
 CONTAINER = "agent-orchestration-daemon"
 
@@ -41,9 +48,15 @@ def image_present(image: str) -> bool:
     return _run(["docker", "image", "inspect", image]).returncode == 0
 
 
-def build_run_argv(image: str, token: str, code_root: str, home: str | None = None) -> list[str]:
+def build_run_argv(
+    image: str,
+    token: str,
+    code_root: str,
+    home: str | None = None,
+    claude_token: str | None = None,
+) -> list[str]:
     home = home or str(Path.home())
-    return [
+    argv = [
         "docker",
         "run",
         "-d",
@@ -62,12 +75,13 @@ def build_run_argv(image: str, token: str, code_root: str, home: str | None = No
         "KENTRA_BOT_GH_TOKEN",
         "-e",
         f"ORCHESTRATION_DAEMON_TOKEN={token}",
-        "-p",
-        "8765:8765",
-        "-p",
-        "42000-42050:42000-42050",
-        image,
     ]
+    if claude_token:
+        # BY VALUE like ORCHESTRATION_DAEMON_TOKEN — no manual export needed.
+        # docker-inspect exposure is the same class as the two tokens above.
+        argv += ["-e", f"CLAUDE_CODE_LONG_LIVED_TOKEN={claude_token}"]
+    argv += ["-p", "8765:8765", "-p", "42000-42050:42000-42050", image]
+    return argv
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -82,6 +96,20 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 0
 
     cfg = config.load_config()
+
+    claude_token = auth_cmd.read_token()
+    if claude_token is None:
+        print(
+            "no long-lived Claude token — agent boxes cannot authenticate.\n"
+            "Mint one first: `orch auth mint` (interactive, ~yearly). "
+            "Non-macOS hosts: export CLAUDE_CODE_LONG_LIVED_TOKEN instead.",
+            file=sys.stderr,
+        )
+        return 1
+    stale = auth_cmd.warn_if_stale()
+    if stale:
+        print(f"warning: {stale}", file=sys.stderr)
+
     image = args.image or cfg.get("image") or config.DEFAULT_IMAGE
     code_root = args.code_root or cfg.get("code_root") or str(Path.home() / "code")
     token = cfg.get("token") or secrets.token_hex(16)
@@ -103,7 +131,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             return 1
 
     _run(["docker", "rm", "-f", CONTAINER])  # clear any stopped leftover
-    proc = _run(build_run_argv(image, token, code_root))
+    proc = _run(build_run_argv(image, token, code_root, claude_token=claude_token))
     if proc.returncode != 0:
         print(f"docker run failed: {proc.stderr.strip()}", file=sys.stderr)
         return 1

@@ -135,7 +135,10 @@ def agent_message_tail(tmpdir: Path, max_bytes: int = _TERMINAL_TAIL_BYTES) -> s
             content = (event.get("data") or {}).get("content", "")
             if content:
                 parts.append(content)
-    return "\n".join(parts[-5:])
+    # Bound the joined result the same 4KB as `tail_file` — a verbose final
+    # agent message must not inflate `verdict.detail` into a near-64KB
+    # GitHub death comment.
+    return "\n".join(parts[-5:])[-4000:]
 
 
 def collect(entry: dict[str, Any]) -> Signals:

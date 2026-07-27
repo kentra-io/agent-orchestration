@@ -213,6 +213,60 @@ def test_preflight_skips_cb_login_heal_under_env_auth(monkeypatch, tmp_path):
     assert "login" not in report
 
 
+def test_resume_fallback_remedy_names_cb_login_without_env_auth(monkeypatch, tmp_path):
+    """A remedy-less verdict (e.g. a probe timeout) with no remedy field must
+    still fall back to something — legacy (no env token) path names `cb
+    login`."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    monkeypatch.setattr(
+        dr,
+        "health_probe",
+        lambda box, **kw: {"ok": False, "classified": None, "remedy": None, "detail": "timeout"},
+    )
+
+    def fake_run(argv, **kwargs):
+        class P:
+            returncode = 1
+            stdout = ""
+            stderr = "still down"
+
+        return P()
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    entry = _entry(tmp_path, box="box-1")
+    try:
+        dr.resume(entry, web_port=42018)
+        raise AssertionError("expected ResumeError")
+    except dr.ResumeError as exc:
+        assert "cb login" in str(exc)
+
+
+def test_resume_fallback_remedy_is_token_aware_under_env_auth(monkeypatch, tmp_path):
+    """Same remedy-less verdict, but under CLAUDE_CODE_LONG_LIVED_TOKEN the
+    box has no session file for `cb login` to heal — the fallback must name
+    `orch auth mint` + a daemon restart instead (harness issue #3)."""
+    monkeypatch.setenv("CLAUDE_CODE_LONG_LIVED_TOKEN", "sk-ant-oat01-x")
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    monkeypatch.setattr(
+        dr,
+        "health_probe",
+        lambda box, **kw: {"ok": False, "classified": None, "remedy": None, "detail": "timeout"},
+    )
+
+    def fake_run(argv, **kwargs):
+        raise AssertionError(f"cb login heal must not run under env auth, got {argv!r}")
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    entry = _entry(tmp_path, box="box-1")
+    try:
+        dr.resume(entry, web_port=42019)
+        raise AssertionError("expected ResumeError")
+    except dr.ResumeError as exc:
+        msg = str(exc)
+        assert "orch auth mint" in msg
+        assert "cb login" not in msg
+
+
 def test_no_box_skips_preflight(monkeypatch, tmp_path):
     monkeypatch.setattr(
         dr, "health_probe", lambda box, **kw: (_ for _ in ()).throw(AssertionError("probed"))

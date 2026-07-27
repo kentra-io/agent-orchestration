@@ -144,7 +144,14 @@ def resume(
         probe = preflight_box_auth(entry["box"], worktree)
         if not probe["ok"]:
             detail = str(probe.get("detail", ""))[:300]
-            remedy = probe.get("remedy") or "run `cb login` from the worktree, then resume"
+            if os.environ.get("CLAUDE_CODE_LONG_LIVED_TOKEN"):
+                # Env-auth boxes hold no session file for `cb login` to heal
+                # (see preflight_box_auth's docstring) — a remedy-less
+                # verdict (e.g. a probe timeout) must not advise it.
+                fallback_remedy = "run `orch auth mint`, then restart the daemon, then resume"
+            else:
+                fallback_remedy = "run `cb login` from the worktree, then resume"
+            remedy = probe.get("remedy") or fallback_remedy
             raise ResumeError(
                 f"box auth/health pre-flight failed [{probe.get('classified')}]: "
                 f"{detail} — remedy: {remedy}"

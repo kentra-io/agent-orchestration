@@ -75,6 +75,16 @@ def test_agent_message_tail_empty_when_no_events_file(tmp_path):
     assert agent_message_tail(tmp_path / "tmpdir") == ""
 
 
+def test_agent_message_tail_bounded_to_4kb(tmp_path):
+    """A verbose final agent message must not inflate `verdict.detail` into a
+    near-64KB GitHub death comment — bound matches `tail_file`'s 4KB."""
+    tmpdir = tmp_path / "tmpdir"
+    huge = "x" * 2000
+    _write_events(tmpdir, [{"type": "agent_message", "data": {"content": huge}} for _ in range(5)])
+    result = agent_message_tail(tmpdir)
+    assert len(result) <= 4000
+
+
 def test_derive_state_dead_on_root_failure_despite_live_pid(tmp_path):
     """harness issue #3, defect B: pid alive + fresh events (the incident
     shape) must not mask a root workflow_failed — it is death NOW."""
