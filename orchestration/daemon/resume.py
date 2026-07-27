@@ -16,6 +16,7 @@ IS its plan surface). The report records which one was used.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -133,6 +134,82 @@ def current_milestones(
         return load_milestones(fixture_path), "fixture"
 
 
+def _workflow_inputs(entry: dict[str, Any], change_id: str, worktree: str) -> dict[str, str]:
+    """The launch-parity workflow input set (PR #35), factored so both resume
+    recipes build it identically.
+
+    Mirrors orchestration.launch.change's full input set (change.py
+    ~L640-680) -- every input execute-change.yaml's templates read via
+    `workflow.input.*` that launch derives from registry-entry facts.
+    Omitting `branch` crashed a real run in 0.02s (`Undefined variable in
+    template: 'dict object' has no attribute 'branch'`) -- see
+    milestone_step's input_mapping in workflows/execute-change.yaml.
+
+    Excludes `plan_fixture_path`: fresh-run-remaining supplies that itself
+    (from its rewritten fixture), and resume-in-place never sets it at all
+    (the checkpoint's own `plan_fixture_path` is authoritative there, per
+    `load_execute_change_checkpoint`).
+    """
+    inputs: dict[str, str] = {"change_id": change_id}
+    inputs["branch"] = entry.get("branch") or f"change/{change_id}"
+    if entry.get("repo_gh"):
+        inputs["notify_repo"] = entry["repo_gh"]
+    if entry.get("issue") is not None:
+        inputs["notify_issue"] = str(entry["issue"])
+    if entry.get("box"):
+        inputs["box"] = entry["box"]
+        inputs["worktree"] = worktree
+        # Production tier facts (launch.py L669-680): a resumed box run
+        # must keep persisting/publishing real commits, not silently
+        # regress to the hermetic dry-run defaults.
+        inputs["commit_dry_run"] = "false"
+        inputs["push_dry_run"] = "false"
+        if entry.get("repo_gh") and entry.get("issue") is not None:
+            inputs["notify_dry_run"] = "false"
+    return inputs
+
+
+def heal_checkpoint_inputs(ckpt_path: Path, out_dir: Path, inputs: dict[str, str]) -> Path:
+    """Backfill a resume-in-place checkpoint's missing workflow inputs.
+
+    `conductor resume` has no `--input` flag -- resume-in-place takes its
+    inputs SOLELY from the checkpoint file, and a checkpoint saved by an
+    OLDER workflow version lacks inputs the CURRENT `execute-change.yaml`
+    now renders (e.g. `branch`, `notify_repo` -- see PR #35). The engine
+    does not backfill schema defaults on the resume path, so the daemon
+    heals its own copy of the checkpoint before handing it to `--from`.
+
+    Only keys in `inputs` that are MISSING from the checkpoint's own
+    top-level `inputs` dict are added -- checkpoint values ALWAYS win over
+    `inputs` (they reflect the run's actual history, never the launch-parity
+    guess). Missing keys are backfilled into both the top-level `inputs`
+    dict and the nested `context.workflow_inputs` dict (the engine actually
+    restores workflow state from the latter — see
+    `conductor.engine.context.WorkflowContext.from_dict` — but both carry
+    the same content on disk, so both are healed).
+
+    Returns `ckpt_path` unchanged, writing nothing, if nothing is missing.
+    Otherwise writes a healed COPY under `out_dir` and returns its path --
+    the original checkpoint is NEVER modified.
+    """
+    ckpt_path = Path(ckpt_path)
+    data = json.loads(ckpt_path.read_text())
+    existing_inputs = data.get("inputs") or {}
+    missing = {k: v for k, v in inputs.items() if k not in existing_inputs}
+    if not missing:
+        return ckpt_path
+
+    data.setdefault("inputs", {}).update(missing)
+    context = data.setdefault("context", {})
+    context.setdefault("workflow_inputs", {}).update(missing)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    healed_path = out_dir / f"healed-{ckpt_path.name}"
+    healed_path.write_text(json.dumps(data))
+    return healed_path
+
+
 def resume(
     entry: dict[str, Any], *, web_port: int, proc_holder: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -173,15 +250,19 @@ def resume(
     conductor_bin = _conductor_bin(None)
     provider = entry.get("provider")
 
+    healed_ckpt_path = ckpt_path
     if remaining == ckpt.milestones[ckpt.cursor_index :]:
         mode = "resume-in-place"
+        healed_ckpt_path = heal_checkpoint_inputs(
+            ckpt_path, tmpdir, _workflow_inputs(entry, change_id, worktree)
+        )
         argv = [
             conductor_bin,
             "--silent",
             "resume",
             workflow,
             "--from",
-            str(ckpt_path),
+            str(healed_ckpt_path),
             "--skip-gates",
             "--web",
             "--web-port",
@@ -192,32 +273,11 @@ def resume(
     else:
         mode = "fresh-run-remaining"
         fixture = write_plan_fixture(tmpdir / "plan-resume.json", remaining)
-        # Mirror orchestration.launch.change's full input set (change.py
-        # ~L640-680) -- a fresh conductor `run` gets none of the checkpoint's
-        # baked-in workflow.input, so every input execute-change.yaml's
-        # templates read via `workflow.input.*` that launch derives from
-        # registry-entry facts must be re-supplied here, not just
-        # plan_fixture_path. Omitting `branch` crashed a real run in 0.02s
-        # (`Undefined variable in template: 'dict object' has no attribute
-        # 'branch'`) -- see milestone_step's input_mapping in
-        # workflows/execute-change.yaml.
-        inputs = {"plan_fixture_path": str(fixture)}
-        inputs["change_id"] = change_id
-        inputs["branch"] = entry.get("branch") or f"change/{change_id}"
-        if entry.get("repo_gh"):
-            inputs["notify_repo"] = entry["repo_gh"]
-        if entry.get("issue") is not None:
-            inputs["notify_issue"] = str(entry["issue"])
-        if entry.get("box"):
-            inputs["box"] = entry["box"]
-            inputs["worktree"] = worktree
-            # Production tier facts (launch.py L669-680): a resumed box run
-            # must keep persisting/publishing real commits, not silently
-            # regress to the hermetic dry-run defaults.
-            inputs["commit_dry_run"] = "false"
-            inputs["push_dry_run"] = "false"
-            if entry.get("repo_gh") and entry.get("issue") is not None:
-                inputs["notify_dry_run"] = "false"
+        # A fresh conductor `run` gets none of the checkpoint's baked-in
+        # workflow.input, so the full launch-parity set must be re-supplied
+        # here, not just plan_fixture_path (see `_workflow_inputs`).
+        inputs = _workflow_inputs(entry, change_id, worktree)
+        inputs["plan_fixture_path"] = str(fixture)
         argv = build_conductor_argv(
             conductor_bin=conductor_bin,
             workflow=workflow,
@@ -281,6 +341,7 @@ def resume(
         "pid": proc.pid,
         "dashboard_url": f"http://localhost:{web_port}",
         "checkpoint": str(ckpt_path),
+        "healed_checkpoint": str(healed_ckpt_path) if healed_ckpt_path != ckpt_path else None,
         "conductor_argv": argv,
         "registry_path": str(registry.entry_path(entry["repo_slug"], change_id)),
     }

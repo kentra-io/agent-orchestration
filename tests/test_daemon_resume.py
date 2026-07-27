@@ -53,9 +53,32 @@ def _inputs_from_argv(argv):
     return out
 
 
-def _ckpt(fixture_path, milestones, cursor):
+def _write_raw_checkpoint(path, *, inputs=None):
+    """A minimal on-disk checkpoint JSON — real enough for
+    `heal_checkpoint_inputs` (raw `json.load`, not `CheckpointManager`) to
+    read/write, with both the top-level `inputs` dict and the nested
+    `context.workflow_inputs` dict the live 007 checkpoints carry."""
+    inputs = dict(inputs) if inputs is not None else {}
+    payload = {
+        "version": 1,
+        "workflow_path": "/wf/execute-change.yaml",
+        "workflow_hash": "sha256:deadbeef",
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "failure": {"error_type": None, "message": None},
+        "inputs": inputs,
+        "current_agent": "milestone_step",
+        "context": {"workflow_inputs": dict(inputs), "agent_outputs": {}},
+        "limits": {},
+    }
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _ckpt(tmp_path, fixture_path, milestones, cursor, *, raw_inputs=None):
+    ckpt_path = tmp_path / "ckpt.json"
+    _write_raw_checkpoint(ckpt_path, inputs=raw_inputs)
     return SimpleNamespace(
-        file_path=Path("/ck/execute-change-x.json"),
+        file_path=ckpt_path,
         current_agent="milestone_step",
         plan_fixture_path=str(fixture_path),
         milestones=milestones,
@@ -90,7 +113,7 @@ def _wire(monkeypatch, tmp_path, ckpt, current_milestones):
 def test_resume_in_place_when_plan_unchanged(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
     entry = _entry(tmp_path)
 
@@ -108,7 +131,7 @@ def test_resume_in_place_when_plan_unchanged(monkeypatch, tmp_path):
 def test_fresh_run_when_plan_changed(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
     entry = _entry(tmp_path)
 
@@ -129,7 +152,7 @@ def test_fresh_run_carries_branch_and_change_id(monkeypatch, tmp_path):
     template: 'dict object' has no attribute 'branch'`)."""
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
     entry = _entry(tmp_path, branch="change/1-a")
 
@@ -155,7 +178,7 @@ def test_fresh_run_carries_branch_and_change_id(monkeypatch, tmp_path):
 def test_fresh_run_defaults_branch_when_entry_branch_missing(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
     entry = _entry(tmp_path, branch="")
 
@@ -171,7 +194,7 @@ def test_fresh_run_carries_box_mirror_and_dry_run_inputs(monkeypatch, tmp_path):
     behavior for a box-enabled, mirror-resolved run."""
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
     monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(True))
     entry = _entry(tmp_path, box="box-1", branch="change/1-a", issue=42, repo_gh="kentra-io/proj")
@@ -215,7 +238,7 @@ def _probe_report(ok, classified="oauth-expired"):
 def test_box_preflight_ok_proceeds(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
     monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(True))
     entry = _entry(tmp_path, box="box-1")
@@ -228,7 +251,7 @@ def test_box_preflight_ok_proceeds(monkeypatch, tmp_path):
 def test_box_preflight_heals_via_cb_login_then_proceeds(monkeypatch, tmp_path):
     fixture = tmp_path / "plan.json"
     fixture.write_text(json.dumps({"milestones": [M1, M2]}))
-    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1)
     spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
 
     probes = iter([_probe_report(False), _probe_report(True)])
@@ -360,3 +383,108 @@ def test_no_box_skips_preflight(monkeypatch, tmp_path):
         raise AssertionError("expected ResumeError")
     except dr.ResumeError as exc:
         assert "no checkpoint" in str(exc)
+
+
+# --- checkpoint input healing (harness: 007's third live death 2026-07-27) ---
+#
+# `conductor resume` has no `--input` flag -- resume-in-place takes its
+# inputs SOLELY from the checkpoint file, and checkpoints saved by OLDER
+# workflow versions lack inputs the CURRENT execute-change.yaml now renders
+# (`branch`, `notify_repo`, ...). The engine does not backfill schema
+# defaults on the resume path, so the daemon must heal the checkpoint copy
+# it hands to `--from` itself.
+
+
+def test_heal_checkpoint_inputs_backfills_missing_keys(tmp_path):
+    ckpt_path = tmp_path / "ckpt.json"
+    _write_raw_checkpoint(
+        ckpt_path,
+        inputs={
+            "change_id": "1-a",
+            "commit_dry_run": "true",  # differs from the passed-in value below
+            "worktree": "/wt",
+        },
+    )
+    original_bytes = ckpt_path.read_bytes()
+
+    healed = dr.heal_checkpoint_inputs(
+        ckpt_path,
+        tmp_path,
+        {
+            "change_id": "1-a",
+            "branch": "change/1-a",
+            "notify_repo": "kentra-io/proj",
+            "commit_dry_run": "false",
+        },
+    )
+
+    assert healed != ckpt_path
+    assert healed.name == f"healed-{ckpt_path.name}"
+    healed_data = json.loads(healed.read_text())
+    # missing keys backfilled, in BOTH dicts
+    assert healed_data["inputs"]["branch"] == "change/1-a"
+    assert healed_data["inputs"]["notify_repo"] == "kentra-io/proj"
+    assert healed_data["context"]["workflow_inputs"]["branch"] == "change/1-a"
+    assert healed_data["context"]["workflow_inputs"]["notify_repo"] == "kentra-io/proj"
+    # existing values win -- never overwritten, even when the passed-in set disagrees
+    assert healed_data["inputs"]["commit_dry_run"] == "true"
+    assert healed_data["context"]["workflow_inputs"]["commit_dry_run"] == "true"
+    # untouched keys survive
+    assert healed_data["inputs"]["change_id"] == "1-a"
+    assert healed_data["inputs"]["worktree"] == "/wt"
+    # original checkpoint is NEVER modified
+    assert ckpt_path.read_bytes() == original_bytes
+
+
+def test_heal_checkpoint_inputs_noop_when_nothing_missing(tmp_path):
+    ckpt_path = tmp_path / "ckpt.json"
+    _write_raw_checkpoint(ckpt_path, inputs={"change_id": "1-a", "branch": "change/1-a"})
+
+    result = dr.heal_checkpoint_inputs(
+        ckpt_path, tmp_path, {"change_id": "1-a", "branch": "change/1-a"}
+    )
+
+    assert result == ckpt_path
+    assert not (tmp_path / f"healed-{ckpt_path.name}").exists()
+
+
+def test_resume_in_place_heals_checkpoint_missing_branch(monkeypatch, tmp_path):
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2]}))
+    ckpt = _ckpt(tmp_path, fixture, [M1, M2], cursor=1, raw_inputs={"change_id": "1-a"})
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
+    entry = _entry(tmp_path, branch="change/1-a")
+
+    report = dr.resume(entry, web_port=42030)
+
+    assert report["mode"] == "resume-in-place"
+    argv = spawned["argv"]
+    from_path = Path(argv[argv.index("--from") + 1])
+    assert from_path != ckpt.file_path
+    assert from_path.name.startswith("healed-")
+    assert report["healed_checkpoint"] == str(from_path)
+    healed_data = json.loads(from_path.read_text())
+    assert healed_data["inputs"]["branch"] == "change/1-a"
+    assert healed_data["context"]["workflow_inputs"]["branch"] == "change/1-a"
+
+
+def test_resume_in_place_uses_original_checkpoint_when_inputs_complete(monkeypatch, tmp_path):
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2]}))
+    ckpt = _ckpt(
+        tmp_path,
+        fixture,
+        [M1, M2],
+        cursor=1,
+        raw_inputs={"change_id": "1-a", "branch": "change/1-a"},
+    )
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2])
+    entry = _entry(tmp_path, branch="change/1-a")
+
+    report = dr.resume(entry, web_port=42031)
+
+    assert report["mode"] == "resume-in-place"
+    argv = spawned["argv"]
+    from_path = Path(argv[argv.index("--from") + 1])
+    assert from_path == ckpt.file_path
+    assert report["healed_checkpoint"] is None
