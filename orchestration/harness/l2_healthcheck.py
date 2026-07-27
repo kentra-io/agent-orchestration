@@ -9,7 +9,11 @@ Input JSON:
       "commands": [str, ...],  # required, non-empty list of shell command strings
       "cwd": str,                # optional, default "."
       "timeout": number,         # optional, seconds, per command, default 600
-      "env": {str: str}          # optional, extra/overriding env vars
+      "env": {str: str},         # optional, extra/overriding env vars
+      "box": str,                # optional: claudebox box id -- run each command
+                                 #   in-box via `cb exec ... bash -lc <command>`
+      "box_workdir": str,        # optional: --workdir for cb exec (the worktree)
+      "cb_binary": str,          # optional, default "cb"
     }
 
 Output JSON:
@@ -38,6 +42,7 @@ from orchestration.harness.common import (
     read_input,
     run_command,
     tail,
+    wrap_in_box,
 )
 
 
@@ -49,6 +54,9 @@ def check(payload: dict[str, Any]) -> dict[str, Any]:
     cwd = payload.get("cwd", ".")
     timeout = payload.get("timeout", 600)
     env = payload.get("env")
+    box = payload.get("box")
+    box_workdir = payload.get("box_workdir")
+    cb_binary = payload.get("cb_binary", "cb")
 
     results = []
     for command in commands:
@@ -56,12 +64,13 @@ def check(payload: dict[str, Any]) -> dict[str, Any]:
             raise HarnessInputError(
                 f"every entry in 'commands' must be a non-empty string, got {command!r}"
             )
+        run_target = wrap_in_box(command, box, box_workdir, cb_binary) if box else command
         exit_code, stdout, stderr = run_command(
-            command, cwd=cwd, timeout=timeout, env_overrides=env
+            run_target, cwd=cwd, timeout=timeout, env_overrides=env
         )
         results.append(
             {
-                "command": command,
+                "command": run_target,
                 "pass": exit_code == 0,
                 "exit_code": exit_code,
                 "stdout_tail": tail(stdout),

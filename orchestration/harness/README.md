@@ -52,6 +52,16 @@ Each checker is a module `orchestration.harness.<name>` that is:
    This is what makes "same input -> same verdict" a testable property
    instead of an aspiration - see `tests/test_harness_determinism.py`.
 
+### In-box execution (`box` / `box_workdir`)
+
+`l1_acceptance` and `l2_healthcheck` accept optional `box`, `box_workdir`,
+and `cb_binary` payload keys. When `box` is non-empty the command is wrapped
+as `cb exec --workdir <box_workdir> <box> bash -lc <command>` so it executes
+on the agents' toolchain with their warm build caches (the host/box
+toolchain split caused #30). `diff_paths` / `deviation_check` are pure
+git/file reads and always run host-side. Omitting `box` (hermetic/stub tier)
+keeps today's host-side execution.
+
 ## The five checkers (plus one aggregator)
 
 | Module | Purpose | Pass/fail meaning |
