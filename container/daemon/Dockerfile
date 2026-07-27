@@ -11,7 +11,7 @@ RUN go install github.com/kentra-io/spec-lifecycle/cmd/lifecycle@4d1f002755ac
 # deliberately, like the lifecycle pin above (ADR-0001 spirit); keep it in sync
 # with CLAUDEBOX_REF in .github/workflows/publish-daemon.yml.
 FROM golang:1.26-bookworm AS cb-build
-ARG CLAUDEBOX_REF=92d7855f654803dd7cef278d7607c65ae77e0a11
+ARG CLAUDEBOX_REF=1d260b0a4333e2359f0745513256aa8592827940
 RUN git clone --quiet https://github.com/kentra-io/claudebox /src \
     && git -C /src checkout --quiet "$CLAUDEBOX_REF" \
     && cd /src && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /cb .
