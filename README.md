@@ -154,6 +154,27 @@ In-box sessions then reach `orch runs` / `orch status` through the daemon;
 without the opt-in, in-box calls can't reach it (the local-registry fallback
 is empty inside a box — the registry lives on the host).
 
+## Run hardening knobs (2026-07-27)
+
+| Knob | Where | Default | Notes |
+|---|---|---|---|
+| Stall watchdog | `CONDUCTOR_CLAUDEBOX_STALL_SECONDS` env, or workflow `runtime.provider: {name: claudebox, stall_timeout_seconds: N}` | 600 s | Kills an LLM step whose stream goes silent, raises a *retryable* provider error — the step's `retry:` restarts it without burning a ladder attempt. `<= 0` disables. Liveness is token-granular (`--include-partial-messages`), so long thinking turns don't trip it. Tune once telemetry shows real silence distributions. |
+| In-box gates | automatic when the run has a box | on | L1 acceptance + change-level healthcheck execute inside the run's claudebox (`cb exec … bash -lc`) — same toolchain and warm build caches as the agents. Stub tier (no box) stays host-side. |
+| Telemetry home | `conductor.tmpdir` launch payload key | `~/.agent-orchestration/runs/<slug>--<change>/conductor/` | events.jsonl, checkpoints, conductor.std{out,err}.log, plan.json — survives worktree cleanup; analyze past runs from here. |
+| Model split | `workflows/milestone.yaml` + persona frontmatter | implementer=sonnet, verifier=opus, orchestrator=opus | 2026-07-27 decision; self-contained plans carry the context, the Opus verifier keeps the trust spine. |
+
+### Build-cache facts
+
+Within a run, all milestones share ONE box — gradle/go/npm caches warm up
+across milestones, and (with in-box gates) the gate commands reuse them.
+Docker *image* pulls (e.g. Testcontainers) already share the host daemon's
+image cache across all boxes and runs: in-box `docker` talks to the host
+daemon through claudebox's socket proxy. Verify:
+`cb exec <box> docker images` lists the same images as host `docker images`.
+Cross-run *dependency* caches (fresh box per run) are accepted cold-start
+cost for now — revisit with shared named volumes if telemetry shows it
+matters.
+
 ## Shape
 
 - Python 3.12+, managed with [`uv`](https://docs.astral.sh/uv/); the sole
