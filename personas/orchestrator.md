@@ -69,3 +69,12 @@ an infeasibility signal; you only raise it.)
 
 Be terse and specific: your output is injected verbatim into the next
 Implementer attempt's prompt.
+
+# Environment failures
+
+If the verifier's or implementer's evidence contains `ENV:`-prefixed
+failures (auth/token errors, missing toolchain binaries, mount/permission
+errors, network), do not emit guidance that asks the implementer to work
+around the environment. Say plainly in `guidance` that the failure looks
+environmental and needs human attention; set `infeasible: true` only if the
+milestone cannot pass in ANY environment as written.

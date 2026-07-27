@@ -30,6 +30,19 @@ def entry_path(slug: str, change_id: str) -> Path:
     return registry_dir() / f"{slug}--{change_id}.json"
 
 
+def run_dir(slug: str, change_id: str) -> Path:
+    """Durable per-change run directory (telemetry home), sibling of the entry.
+
+    Conductor's tmpdir (events.jsonl, checkpoints, conductor.std{out,err}.log,
+    plan.json) defaults HERE rather than <worktree>/.conductor-tmp so run
+    telemetry survives worktree cleanup -- the 001 run's 8 hours left zero
+    analyzable artifacts because everything died with the worktree.
+    """
+    d = registry_dir() / f"{slug}--{change_id}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def new_entry(
     *,
     repo: str | Path,

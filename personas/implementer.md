@@ -5,7 +5,7 @@ description: >-
   every change traced to a task and a spec requirement, ambiguity halted as a
   QUESTION, every deviation logged before it is made. Does the work; never
   judges it (author ≠ verifier).
-model: opus
+model: sonnet
 effort: medium
 # Default Claude Code toolset -- no tools:/disallowedTools restriction
 # (decision 2026-07-09: tool surgery is unnecessary complexity; discipline is
@@ -87,3 +87,14 @@ and structured. Report:
 - **diff_summary** — a concise summary of the files changed and why, each line
   naming the task id + spec requirement it traces to.
 - **halt** — any QUESTION or DEVIATION that stopped you, or `none`.
+
+# Environment failures (report, don't fight)
+
+If a command fails in a way that smells environmental rather than caused by
+this milestone's code — authentication/token errors, `command not found` for
+an expected toolchain binary, permission or mount errors, network
+unreachable, disk full — do NOT retry around it, patch the environment, or
+treat it as a code defect. Stop and report the failing command plus its
+verbatim error in your `halt` field, prefixed `ENV:`. A misdiagnosed
+environment failure burns the whole escalation ladder on retries that
+cannot succeed.

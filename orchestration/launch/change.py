@@ -12,12 +12,15 @@ box and exit 0 without an interactive attach) -> resolve the box via
 
 Concurrency (P10) is process-per-change: this module spawns exactly one
 `conductor run` child process per invocation, in the change's own worktree,
-with `TMPDIR` relocated to a *persistent, worktree-scoped* directory (P4 —
+with `TMPDIR` relocated to a *persistent, change-scoped* directory (P4 —
 see `orchestration.launch.checkpoint_env`) so two concurrent changes never
-share a checkpoint/event-log directory by construction (each worktree is
-already isolated by the caller's `worktree_root`/`change_id`, so defaulting
-`conductor.tmpdir` to `<worktree>/.conductor-tmp` gets per-change isolation
-for free, with no separate registry to keep in sync). `wait: false` spawns
+share a checkpoint/event-log directory by construction: `conductor.tmpdir`
+defaults to `~/.agent-orchestration/runs/<slug>--<change_id>/conductor`
+(the change-keyed registry run dir, `orchestration.obs.registry.run_dir`),
+not `<worktree>/.conductor-tmp`, so run telemetry (events.jsonl,
+checkpoints, `conductor.std{out,err}.log`, plan.json) survives worktree
+cleanup by construction; an explicit `conductor.tmpdir` still wins.
+`wait: false` spawns
 the child and returns immediately (pid only) — that is what makes running
 N changes concurrently from N `python -m orchestration.launch.change`
 invocations meaningfully concurrent rather than serialized by an
@@ -60,7 +63,8 @@ Input JSON:
         "provider": str | null,        # optional --provider override ("stub" for the hermetic tier)
         "inputs": {str: str, ...},     # optional extra --input key=value pairs
         "plan_fixture_path": str,      # optional -- bypass `lifecycle apply`, use this fixture
-        "tmpdir": str,                 # optional, default "<worktree>/.conductor-tmp" (P4)
+        "tmpdir": str,                 # optional, default the registry run dir
+                                       #   "~/.agent-orchestration/runs/<slug>--<id>/conductor" (P4)
         "env": {str: str, ...},        # optional extra/overriding env vars for the child
         "silent": bool,                # default true -- passes `--silent` to `conductor`
         "conductor_bin": str,          # optional override, default resolved from this venv/PATH
@@ -618,7 +622,10 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
             raise_on_fail=True,
         )
 
-    tmpdir = Path(conductor_cfg.get("tmpdir") or (worktree / ".conductor-tmp"))
+    tmpdir = Path(
+        conductor_cfg.get("tmpdir")
+        or obs_registry.run_dir(obs_registry.repo_slug(repo_path), change_id) / "conductor"
+    )
     tmpdir.mkdir(parents=True, exist_ok=True)
 
     # owner/repo for the GitHub mirror (D9): an explicit payload override wins

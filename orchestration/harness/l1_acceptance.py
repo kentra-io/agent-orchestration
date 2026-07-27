@@ -9,7 +9,11 @@ Input JSON:
       "command": str,          # required: shell command string
       "cwd": str,               # optional, default "."
       "timeout": number,        # optional, seconds, default 600
-      "env": {str: str}         # optional, extra/overriding env vars
+      "env": {str: str},        # optional, extra/overriding env vars
+      "box": str,               # optional: claudebox box id -- run the command
+                                #   in-box via `cb exec ... bash -lc <command>`
+      "box_workdir": str,       # optional: --workdir for cb exec (the worktree)
+      "cb_binary": str,         # optional, default "cb"
     }
 
 Output JSON:
@@ -37,6 +41,7 @@ from orchestration.harness.common import (
     read_input,
     run_command,
     tail,
+    wrap_in_box,
 )
 
 
@@ -44,6 +49,11 @@ def check(payload: dict[str, Any]) -> dict[str, Any]:
     command = payload.get("command")
     if not command or not isinstance(command, str):
         raise HarnessInputError("'command' (non-empty string) is required")
+    box = payload.get("box")
+    if box:
+        command = wrap_in_box(
+            command, box, payload.get("box_workdir"), payload.get("cb_binary", "cb")
+        )
 
     cwd = payload.get("cwd", ".")
     timeout = payload.get("timeout", 600)

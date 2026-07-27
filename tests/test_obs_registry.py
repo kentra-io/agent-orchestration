@@ -67,3 +67,10 @@ def test_write_is_atomic_json(tmp_path, monkeypatch):
     )
     json.loads(path.read_text())  # valid JSON on disk
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_run_dir_is_sibling_of_entry_and_created(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path))
+    d = registry.run_dir("myrepo", "007-yaml")
+    assert d == tmp_path / "myrepo--007-yaml"
+    assert d.is_dir()

@@ -220,10 +220,13 @@ agents:
     # <worktree>/.claude/agents/implementer.md). The provider passes
     # `--agent implementer`, so the persona's MUST/HALT contract (spec sec 6.2)
     # is the system prompt; this inline prompt supplies only per-invocation
-    # task context. `--model opus` overrides the frontmatter model; the
+    # task context. The step's `model:` overrides the frontmatter model; the
     # persona's `effort: medium` (spec sec 6) rides the frontmatter.
     description: Does the milestone's work -- solo on attempt 1, guided by the Orchestrator on attempts 2-3.
-    model: opus # spec sec 6: Implementer = Opus, medium effort (effort in persona frontmatter)
+    model: sonnet # 2026-07-27 decision (run-hardening): Sonnet implements, Opus
+                  # verifies -- self-contained plans carry the context that made
+                  # Opus necessary; the trust spine stays on the Opus verifier.
+                  # (supersedes spec sec 6's Implementer = Opus)
     input:
       - workflow.input.milestone_id
       - workflow.input.milestone_summary
@@ -270,7 +273,9 @@ agents:
       above. Whichever resolved value is empty/`"none"` OMITS the `l1`
       key entirely (a native skip) rather than sending an empty command,
       which `orchestration.harness.l1_acceptance` would reject as a
-      harness error (exit 2), not a trivial pass.
+      harness error (exit 2), not a trivial pass. When workflow.input.box
+      is non-empty the L1 command executes IN-BOX (cb exec) on the
+      agents' toolchain; the stub tier (box="") keeps host-side execution.
     command: python3
     args: ["-m", "orchestration.harness.gates"]
     stdin: >-
@@ -278,8 +283,11 @@ agents:
       {% set _static_check = workflow.input.gates_l1_command | trim %}
       {% set _check = _contract_check if (_contract_check and
       _contract_check != 'none') else _static_check %}
-      {{ ({"l1": {"command": _check}} if (_check and _check != 'none')
-      else {}) | tojson }}
+      {% set _box = workflow.input.box | trim %}
+      {% set _l1 = ({"command": _check, "box": _box,
+      "box_workdir": workflow.input.worktree} if _box
+      else {"command": _check}) %}
+      {{ ({"l1": _l1} if (_check and _check != 'none') else {}) | tojson }}
     routes:
       - to: verifier
 

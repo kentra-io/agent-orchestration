@@ -15,6 +15,7 @@ different `git`/`python` versions or PATH contents.
 
 import json
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -172,6 +173,27 @@ def run_command(
         stderr = (exc.stderr or "") + f"\n[harness] command timed out after {timeout}s\n"
         return TIMEOUT_EXIT_CODE, stdout, stderr
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def wrap_in_box(
+    command: str,
+    box: str,
+    workdir: str | None = None,
+    cb_binary: str = "cb",
+) -> str:
+    """Wrap a shell command string to execute inside a claudebox box.
+
+    Deterministic gate commands (L1/L2) must run on the SAME toolchain the
+    agents build with -- the box, not the daemon host (host/box toolchain
+    split caused #30). The worktree is bind-mounted into the box at the same
+    absolute path, so `--workdir <worktree>` lands in the same tree. The
+    whole inner command is shell-quoted into ONE `bash -lc` argument.
+    """
+    argv = [cb_binary, "exec"]
+    if workdir:
+        argv += ["--workdir", workdir]
+    argv += [box, "bash", "-lc", command]
+    return " ".join(shlex.quote(a) for a in argv)
 
 
 @lru_cache(maxsize=256)
