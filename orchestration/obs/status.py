@@ -115,9 +115,22 @@ def terminal_root_event_type(tmpdir: Path) -> str | None:
     return None
 
 
-def agent_message_tail(tmpdir: Path, max_bytes: int = _TERMINAL_TAIL_BYTES) -> str:
+def agent_message_tail(
+    tmpdir: Path,
+    max_bytes: int = _TERMINAL_TAIL_BYTES,
+    *,
+    since_ts: float | None = None,
+) -> str:
     """Recent `agent_message` content from the newest events file — the OAuth
     death text arrives as an agent text block, not on stderr (issue #3).
+
+    `since_ts` (epoch seconds, matching an event's `timestamp` field) scopes
+    the read to events at or after that cutoff — a resume respawns into the
+    SAME relocated events.jsonl as the prior incarnation (only the
+    stdout/stderr logs get truncated per-incarnation on resume, see
+    `orchestration.daemon.resume`), so an unscoped tail can resurface a PRIOR
+    incarnation's death text inside the current incarnation's classification
+    window. None (the default) keeps the old, unscoped behavior.
     """
     newest = _newest_events_file(tmpdir)
     if newest is None:
@@ -131,10 +144,15 @@ def agent_message_tail(tmpdir: Path, max_bytes: int = _TERMINAL_TAIL_BYTES) -> s
             event = json.loads(line)
         except ValueError:
             continue  # a tail read can start mid-line; skip the fragment
-        if isinstance(event, dict) and event.get("type") == "agent_message":
-            content = (event.get("data") or {}).get("content", "")
-            if content:
-                parts.append(content)
+        if not isinstance(event, dict) or event.get("type") != "agent_message":
+            continue
+        if since_ts is not None:
+            ts = event.get("timestamp")
+            if isinstance(ts, int | float) and ts < since_ts:
+                continue
+        content = (event.get("data") or {}).get("content", "")
+        if content:
+            parts.append(content)
     # Bound the joined result the same 4KB as `tail_file` — a verbose final
     # agent message must not inflate `verdict.detail` into a near-64KB
     # GitHub death comment.

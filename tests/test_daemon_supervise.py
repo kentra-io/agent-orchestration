@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 
 import orchestration.daemon.github_mirror as gm
 from orchestration.daemon.supervise import Supervisor, _classify_from_entry
@@ -112,6 +113,70 @@ def test_classify_from_entry_reads_agent_messages(tmp_path, monkeypatch):
             {
                 "type": "agent_message",
                 "data": {"content": "Failed to authenticate: OAuth session expired"},
+            }
+        )
+        + "\n"
+    )
+    entry = registry.load_entry("r", "1-a")
+    verdict = _classify_from_entry(entry, 1)
+    assert verdict.kind == "oauth-expired"
+
+
+def test_classify_from_entry_scopes_events_to_current_incarnation(tmp_path, monkeypatch):
+    """Bug B (harness resume-input-and-event-scoping): a resumed run appends
+    events into the PRIOR incarnation's relocated `*.events.jsonl` (only the
+    stdout/stderr logs get truncated per-incarnation -- resume.py:216-222).
+    A stale OAuth-death `agent_message` from BEFORE the current incarnation
+    started must not misclassify a real, different, CURRENT death (here: a
+    template-render crash surfaced only on stderr)."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path)
+    started_at = "2026-07-24T12:00:00+00:00"
+    registry.update_incarnation("r", "1-a", started_at=started_at)
+    started_ts = datetime.fromisoformat(started_at).timestamp()
+
+    (tmpdir / "conductor.stdout.log").write_text("")
+    (tmpdir / "conductor.stderr.log").write_text(
+        "Failed to render input_mapping key 'branch' for agent 'milestone_step': "
+        "Undefined variable in template: 'dict object' has no attribute 'branch'"
+    )
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {
+                    "type": "agent_message",
+                    "data": {"content": "Failed to authenticate: OAuth session expired"},
+                    "timestamp": started_ts - 3600,  # PRIOR incarnation's death text
+                },
+                {"type": "workflow_failed", "data": {}, "timestamp": started_ts + 1},
+            ]
+        )
+        + "\n"
+    )
+    entry = registry.load_entry("r", "1-a")
+    verdict = _classify_from_entry(entry, 1)
+    assert verdict.kind != "oauth-expired"
+    assert verdict.kind == "unknown"
+
+
+def test_classify_from_entry_unparseable_started_at_keeps_old_behavior(tmp_path, monkeypatch):
+    """`_register`'s started_at ("x") is not ISO-8601 -- the cutoff must fall
+    back to None (old, unscoped behavior) rather than raise."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path)
+    (tmpdir / "conductor.stdout.log").write_text("")
+    (tmpdir / "conductor.stderr.log").write_text("")
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "agent_message",
+                "data": {"content": "Failed to authenticate: OAuth session expired"},
+                "timestamp": 1.0,
             }
         )
         + "\n"

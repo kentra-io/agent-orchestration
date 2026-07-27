@@ -23,21 +23,34 @@ M2_EDITED = {"id": 2, "title": "two (rescoped by human)"}
 M3 = {"id": 3, "title": "three"}
 
 
-def _entry(tmp_path, *, box=None, provider="stub", env=None):
+def _entry(tmp_path, *, box=None, provider="stub", env=None, branch="b", issue=None, repo_gh=None):
     e = registry.new_entry(
         repo="/r/proj",
         change_id="1-a",
         worktree=str(tmp_path / "wt"),
-        branch="b",
+        branch=branch,
         box=box,
         tmpdir=str(tmp_path / "tmp"),
         provider=provider,
         conductor_env=env or {},
+        issue=issue,
+        repo_gh=repo_gh,
     )
     (tmp_path / "wt").mkdir(exist_ok=True)
     (tmp_path / "tmp").mkdir(exist_ok=True)
     registry.write_entry(e)
     return e
+
+
+def _inputs_from_argv(argv):
+    """Reconstruct the {key: value} --input map from a built conductor argv."""
+    out = {}
+    it = iter(argv)
+    for item in it:
+        if item == "--input":
+            key, _, value = next(it).partition("=")
+            out[key] = value
+    return out
 
 
 def _ckpt(fixture_path, milestones, cursor):
@@ -106,6 +119,74 @@ def test_fresh_run_when_plan_changed(monkeypatch, tmp_path):
     written = json.loads(Path(fixture_arg.split("=", 1)[1]).read_text())
     assert [m["id"] for m in written["milestones"]] == [2, 3]  # id 1 never re-runs
     assert report["mode"] == "fresh-run-remaining"
+
+
+def test_fresh_run_carries_branch_and_change_id(monkeypatch, tmp_path):
+    """Bug A regression: fresh-run-remaining must forward every workflow
+    input that `execute-change.yaml` templates read via `workflow.input.*`
+    and that the launcher (orchestration.launch.change) derives unconditionally
+    -- omitting `branch` crashed a real run in 0.02s (`Undefined variable in
+    template: 'dict object' has no attribute 'branch'`)."""
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
+    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
+    entry = _entry(tmp_path, branch="change/1-a")
+
+    report = dr.resume(entry, web_port=42020)
+    assert report["mode"] == "fresh-run-remaining"
+    inputs = _inputs_from_argv(spawned["argv"])
+    assert inputs["branch"] == "change/1-a"
+    assert inputs["change_id"] == "1-a"
+    # No box/issue/repo_gh on this entry -- none of the box-tier or mirror
+    # inputs should be forced in.
+    for absent in (
+        "notify_repo",
+        "notify_issue",
+        "box",
+        "worktree",
+        "commit_dry_run",
+        "push_dry_run",
+        "notify_dry_run",
+    ):
+        assert absent not in inputs
+
+
+def test_fresh_run_defaults_branch_when_entry_branch_missing(monkeypatch, tmp_path):
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
+    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
+    entry = _entry(tmp_path, branch="")
+
+    dr.resume(entry, web_port=42021)
+    inputs = _inputs_from_argv(spawned["argv"])
+    assert inputs["branch"] == "change/1-a"
+
+
+def test_fresh_run_carries_box_mirror_and_dry_run_inputs(monkeypatch, tmp_path):
+    """Full input-gap audit vs orchestration.launch.change: box tier +
+    GitHub mirror inputs (notify_repo/notify_issue/commit_dry_run/
+    push_dry_run/notify_dry_run) must also be forwarded, matching launch's
+    behavior for a box-enabled, mirror-resolved run."""
+    fixture = tmp_path / "plan.json"
+    fixture.write_text(json.dumps({"milestones": [M1, M2_EDITED, M3]}))
+    ckpt = _ckpt(fixture, [M1, M2], cursor=1)
+    spawned = _wire(monkeypatch, tmp_path, ckpt, [M1, M2_EDITED, M3])
+    monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(True))
+    entry = _entry(tmp_path, box="box-1", branch="change/1-a", issue=42, repo_gh="kentra-io/proj")
+
+    dr.resume(entry, web_port=42022)
+    inputs = _inputs_from_argv(spawned["argv"])
+    assert inputs["branch"] == "change/1-a"
+    assert inputs["change_id"] == "1-a"
+    assert inputs["box"] == "box-1"
+    assert inputs["worktree"] == entry["worktree"]
+    assert inputs["notify_repo"] == "kentra-io/proj"
+    assert inputs["notify_issue"] == "42"
+    assert inputs["commit_dry_run"] == "false"
+    assert inputs["push_dry_run"] == "false"
+    assert inputs["notify_dry_run"] == "false"
 
 
 def test_no_checkpoint_raises(monkeypatch, tmp_path):

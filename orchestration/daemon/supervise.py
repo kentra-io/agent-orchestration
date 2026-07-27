@@ -23,10 +23,30 @@ from orchestration.obs.status import (
 )
 
 
+def _incarnation_cutoff(entry: dict[str, Any]) -> float | None:
+    """Epoch cutoff for `agent_message_tail`'s `since_ts` — the LAST (i.e.
+    current) incarnation's `started_at`. Resume appends events into the same
+    relocated events.jsonl as the prior incarnation (module docstring in
+    orchestration/obs/status.py), so classifying the current incarnation
+    must not read agent_message text emitted before it started. Returns None
+    (old, unscoped behavior) when there is no incarnation or `started_at` is
+    absent/unparseable."""
+    incarnations = entry.get("incarnations") or []
+    if not incarnations:
+        return None
+    started_at = incarnations[-1].get("started_at")
+    if not started_at:
+        return None
+    try:
+        return datetime.fromisoformat(started_at).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def _classify_from_entry(entry: dict[str, Any], exit_code: int | None) -> Any:
     tmpdir = Path(entry["tmpdir"])
     stdout_tail = tail_file(tmpdir / "conductor.stdout.log")
-    events_tail = agent_message_tail(tmpdir)
+    events_tail = agent_message_tail(tmpdir, since_ts=_incarnation_cutoff(entry))
     if events_tail:
         stdout_tail = f"{stdout_tail}\n{events_tail}"
     return classify(
