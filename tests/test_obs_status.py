@@ -93,6 +93,11 @@ def test_agent_message_tail_since_ts_excludes_older_events(tmp_path):
             },
             {
                 "type": "agent_message",
+                "data": {"content": "BOUNDARY: exactly at cutoff"},
+                "timestamp": 1500.0,
+            },
+            {
+                "type": "agent_message",
                 "data": {"content": "NEW: template render error"},
                 "timestamp": 2000.0,
             },
@@ -100,6 +105,8 @@ def test_agent_message_tail_since_ts_excludes_older_events(tmp_path):
     )
     result = agent_message_tail(tmpdir, since_ts=1500.0)
     assert "template render error" in result
+    # an event stamped exactly at started_at belongs to THIS incarnation
+    assert "exactly at cutoff" in result
     assert "OAuth session expired" not in result
 
 

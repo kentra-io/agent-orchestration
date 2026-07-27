@@ -239,6 +239,9 @@ def resume(
     # them; truncation is correct (they are THIS incarnation's logs now).
     stdout_path = tmpdir / "conductor.stdout.log"
     stderr_path = tmpdir / "conductor.stderr.log"
+    # Stamped BEFORE the spawn so the incarnation's event-tail cutoff
+    # (supervise._incarnation_cutoff) can never postdate the child's first event.
+    started_at = datetime.now(UTC).isoformat()
     with (
         open(stdout_path, "w", encoding="utf-8") as out,
         open(stderr_path, "w", encoding="utf-8") as err,
@@ -260,7 +263,7 @@ def resume(
         change_id,
         {
             "pid": proc.pid,
-            "started_at": datetime.now(UTC).isoformat(),
+            "started_at": started_at,
             "web_port": web_port,
             "dashboard_url": f"http://localhost:{web_port}",
             "exit_code": None,

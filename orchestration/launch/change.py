@@ -736,6 +736,9 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
     report["stdout_path"] = str(stdout_path)
     report["stderr_path"] = str(stderr_path)
 
+    # Stamped BEFORE the spawn so the incarnation's event-tail cutoff
+    # (supervise._incarnation_cutoff) can never postdate the child's first event.
+    started_at = datetime.now(UTC).isoformat()
     with (
         open(stdout_path, "w", encoding="utf-8") as out,
         open(stderr_path, "w", encoding="utf-8") as err,
@@ -757,7 +760,7 @@ def launch(payload: dict[str, Any], proc_holder: dict[str, Any] | None = None) -
         change_id,
         {
             "pid": proc.pid,
-            "started_at": datetime.now(UTC).isoformat(),
+            "started_at": started_at,
             "web_port": web_port or None,
             "dashboard_url": f"http://localhost:{web_port}" if web_port else None,
             "exit_code": None,
