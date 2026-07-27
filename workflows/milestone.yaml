@@ -223,7 +223,10 @@ agents:
     # task context. `--model opus` overrides the frontmatter model; the
     # persona's `effort: medium` (spec sec 6) rides the frontmatter.
     description: Does the milestone's work -- solo on attempt 1, guided by the Orchestrator on attempts 2-3.
-    model: opus # spec sec 6: Implementer = Opus, medium effort (effort in persona frontmatter)
+    model: sonnet # 2026-07-27 decision (run-hardening): Sonnet implements, Opus
+                  # verifies -- self-contained plans carry the context that made
+                  # Opus necessary; the trust spine stays on the Opus verifier.
+                  # (supersedes spec sec 6's Implementer = Opus)
     input:
       - workflow.input.milestone_id
       - workflow.input.milestone_summary

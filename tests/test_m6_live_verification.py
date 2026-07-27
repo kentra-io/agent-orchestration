@@ -29,8 +29,10 @@ cast agents ship the default toolset):
 Scenarios a/b/f/d invoke the persona directly via the exact
 ClaudeboxProvider argv shape (conductor/providers/claudebox.py
 `_build_argv`): `cb exec --workdir <fixture> <box> claude -p <task>
---agent <role> --model opus --permission-mode bypassPermissions
---output-format stream-json --verbose`. Scenario c runs
+--agent <role> --model <role's pinned model, see workflows/milestone.yaml>
+--permission-mode bypassPermissions --output-format stream-json
+--verbose` (verifier = opus, implementer = sonnet -- 2026-07-27
+model-split decision). Scenario c runs
 `conductor run workflows/milestone.yaml` for real, like
 test_workflows_live.py runs m1b.
 
@@ -73,9 +75,10 @@ REPO_ROOT = Path(__file__).parent.parent
 WORKFLOW = REPO_ROOT / "workflows" / "milestone.yaml"
 CONDUCTOR_BIN = Path(sys.executable).parent / "conductor"
 
-# One persona invocation is a full agentic run (reads, greps, test runs)
-# on opus -- give it real headroom. The ladder run chains implementer +
-# gates + verifier (plus schema parse-recovery round-trips), so more still.
+# One persona invocation is a full agentic run (reads, greps, test runs) --
+# give it real headroom regardless of which model the role pins. The ladder
+# run chains implementer + gates + verifier (plus schema parse-recovery
+# round-trips), so more still.
 AGENT_TIMEOUT_SECONDS = 900
 LADDER_TIMEOUT_SECONDS = 1800
 
@@ -98,6 +101,11 @@ def _cb_binary() -> str:
     return os.environ.get("CONDUCTOR_CLAUDEBOX_CB_PATH", "cb")
 
 
+# Mirrors each role's pinned model in workflows/milestone.yaml (2026-07-27
+# model-split decision: Sonnet implements, Opus verifies/orchestrates).
+_ROLE_MODEL = {"implementer": "sonnet", "verifier": "opus", "orchestrator": "opus"}
+
+
 def _run_cast_agent(box: str, fixture: MilestoneFixture, role: str, prompt: str) -> str:
     """One `cb exec ... claude -p ... --agent <role> ...` run; returns the
     terminal `result` event's text.
@@ -118,7 +126,7 @@ def _run_cast_agent(box: str, fixture: MilestoneFixture, role: str, prompt: str)
         "--agent",
         role,
         "--model",
-        "opus",
+        _ROLE_MODEL[role],
         "--permission-mode",
         "bypassPermissions",
         "--output-format",

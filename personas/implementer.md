@@ -5,7 +5,7 @@ description: >-
   every change traced to a task and a spec requirement, ambiguity halted as a
   QUESTION, every deviation logged before it is made. Does the work; never
   judges it (author ≠ verifier).
-model: opus
+model: sonnet
 effort: medium
 # Default Claude Code toolset -- no tools:/disallowedTools restriction
 # (decision 2026-07-09: tool surgery is unnecessary complexity; discipline is
