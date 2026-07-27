@@ -70,6 +70,18 @@ inside the container). `orch daemon start` refuses to start without a
 token — a daemon that starts anyway would launch boxes that silently can't
 authenticate, which is the pre-fix failure mode.
 
+> **Verification status (2026-07-27):** the chain is live-verified end-to-end
+> (bogus-token negative probe fails in ~3 s classified `oauth-expired`; boxes
+> run credential-file-free). Two behaviors are pinned by unit tests only and
+> have never been exercised live: (1) `orch daemon start` refusing when
+> neither keychain nor environment provides a token
+> (`tests/test_cli_daemon_cmd.py::test_cmd_start_errors_without_token` —
+> live-testing it means tampering with the operator's keychain), and (2) the
+> `needs-human-input` GitHub label on a real mid-run OAuth death
+> (`tests/test_daemon_github_mirror.py::test_terminal_oauth_expired_adds_needs_human_label`
+> — live-testing it means sabotaging a live run's auth). If you change either
+> path, those tests are the spec.
+
 Non-macOS hosts, or the `make daemon-run` build-from-source path, have no
 keychain to read — export the token instead:
 

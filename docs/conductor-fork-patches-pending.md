@@ -3,6 +3,17 @@
 Per constitution ADR-0001, provider fixes belong in the `kentra-io/conductor`
 fork patch-set (branch `kentra-patches`), not as edits to the installed `.venv`.
 
+**Status 2026-07-27: nothing pending.** (Known engine limitation, worked
+around downstream, no patch planned: `conductor resume` takes workflow inputs
+solely from the checkpoint — there is no `--input` flag and the engine never
+re-applies workflow-declared input defaults on resume, so an old-schema
+checkpoint dies on a newer template. Worked around in
+`orchestration/daemon/resume.py::heal_checkpoint_inputs`, which backfills
+declared defaults + registry-derived launch facts into a healed checkpoint
+copy; checkpoint values always win. Also latent there: `conductor_cfg["inputs"]`
+is not persisted, so resume cannot restore bespoke launch inputs — currently
+vacuous since all launch inputs are registry-derivable.)
+
 **Status 2026-07-23: nothing pending.** Both fixes below are upstreamed in
 fork commit `ab0ff4c` (branch `kentra-patches`) with regression tests, and the
 pin in `pyproject.toml` / `uv.lock` is bumped to it. The related auth-expiry
