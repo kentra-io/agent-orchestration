@@ -1,6 +1,8 @@
 import argparse
 import json
 
+import pytest
+
 import orchestration.cli.daemon_cmd as dc
 
 
@@ -13,6 +15,17 @@ def _ns(**kw):
     base = {"image": None, "code_root": None}
     base.update(kw)
     return argparse.Namespace(**base)
+
+
+@pytest.fixture(autouse=True)
+def _fake_claude_token(monkeypatch):
+    """Hermeticity: `cmd_start` now reads the long-lived Claude token via
+    `auth_cmd.read_token()` (env override -> macOS keychain via `security`).
+    Default every test to a fake present token so pre-existing `cmd_start`
+    tests never shell out to the real keychain; the missing-token test below
+    overrides this back to None."""
+    monkeypatch.setattr(dc.auth_cmd, "read_token", lambda: "sk-ant-oat01-test")
+    monkeypatch.setattr(dc.auth_cmd, "warn_if_stale", lambda: None)
 
 
 def test_build_run_argv_mirrors_makefile():
@@ -47,6 +60,16 @@ def test_build_run_argv_mirrors_makefile():
         "42000-42050:42000-42050",
         "ghcr.io/kentra-io/agent-orchestration-daemon:latest",
     ]
+
+
+def test_build_run_argv_includes_claude_token():
+    argv = dc.build_run_argv("img", "tok", "/code", home="/h", claude_token="sk-ant-oat01-x")
+    assert "-e" in argv and "CLAUDE_CODE_LONG_LIVED_TOKEN=sk-ant-oat01-x" in argv
+
+
+def test_build_run_argv_omits_claude_token_when_none():
+    argv = dc.build_run_argv("img", "tok", "/code", home="/h", claude_token=None)
+    assert not any(a.startswith("CLAUDE_CODE_LONG_LIVED_TOKEN") for a in argv)
 
 
 def test_start_idempotent_when_running(monkeypatch, tmp_path):
@@ -91,12 +114,33 @@ def test_start_generates_and_persists_token(monkeypatch, tmp_path):
     assert len(token) == 32  # secrets.token_hex(16)
     run_argv = next(a for a in calls if a[:2] == ["docker", "run"])
     assert f"ORCHESTRATION_DAEMON_TOKEN={token}" in run_argv
+    assert "CLAUDE_CODE_LONG_LIVED_TOKEN=sk-ant-oat01-test" in run_argv
 
 
 def test_start_exit2_when_docker_unreachable(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("ORCHESTRATION_CONFIG_PATH", str(tmp_path / "daemon.json"))
     monkeypatch.setattr(dc, "docker_available", lambda: False)
     assert dc.cmd_start(_ns()) == 2
+
+
+def test_cmd_start_errors_without_token(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("ORCHESTRATION_CONFIG_PATH", str(tmp_path / "daemon.json"))
+    monkeypatch.setattr(dc.auth_cmd, "read_token", lambda: None)
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        if argv[:2] == ["docker", "info"]:
+            return R(0)
+        if argv[:2] == ["docker", "inspect"]:
+            return R(1)  # no container
+        raise AssertionError(f"unexpected docker call: {argv}")
+
+    monkeypatch.setattr(dc, "_run", fake_run)
+    assert dc.cmd_start(_ns()) == 1
+    err = capsys.readouterr().err
+    assert "orch auth mint" in err
+    assert not any(a[:2] == ["docker", "run"] for a in calls)
 
 
 def test_start_pull_denied_hints_ghcr_login(monkeypatch, tmp_path, capsys):

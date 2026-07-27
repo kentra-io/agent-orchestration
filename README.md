@@ -52,8 +52,33 @@ state wins** — read it via the `orchestration-monitor` /
 
 ```bash
 uv tool install git+https://github.com/kentra-io/agent-orchestration
-orch daemon start           # pulls the public GHCR daemon image on first run
+orch auth mint               # one-time (macOS): mints a long-lived Claude token into the keychain
+orch daemon start             # pulls the public GHCR daemon image on first run
 ```
+
+### Auth custody: the long-lived Claude token
+
+Agent boxes authenticate with a ~1-year, non-rotating `claude setup-token`
+credential, not the interactive OAuth session (harness issue #3). Custody
+chain: `orch auth mint` runs the `claude setup-token` flow, verifies it live,
+and stores it in the macOS keychain (service `kentra-orch-claude-token`) —
+`orch daemon start` runs host-side, so it can read the keychain, and passes
+the token **by value** into the daemon container as
+`CLAUDE_CODE_LONG_LIVED_TOKEN` (same custody class as
+`ORCHESTRATION_DAEMON_TOKEN`; no manual export, no keychain access needed
+inside the container). `orch daemon start` refuses to start without a
+token — a daemon that starts anyway would launch boxes that silently can't
+authenticate, which is the pre-fix failure mode.
+
+Non-macOS hosts, or the `make daemon-run` build-from-source path, have no
+keychain to read — export the token instead:
+
+```bash
+CLAUDE_CODE_LONG_LIVED_TOKEN=$(security find-generic-password -s kentra-orch-claude-token -w) make daemon-run
+```
+
+(`orch daemon start` also honors `CLAUDE_CODE_LONG_LIVED_TOKEN` in the
+environment as an override, ahead of the keychain, on any host.)
 
 ## Quickstart
 

@@ -1,9 +1,19 @@
+import json
+import os
 import subprocess
 import sys
 
 import orchestration.daemon.github_mirror as gm
-from orchestration.daemon.supervise import Supervisor
+from orchestration.daemon.supervise import Supervisor, _classify_from_entry
 from orchestration.obs import registry
+
+
+def _write_root_event(tmpdir, event_type):
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        json.dumps({"type": event_type, "data": {}}) + "\n"
+    )
 
 
 def _register(tmp_path, change_id="1-a", pid=None):
@@ -62,6 +72,53 @@ def test_reconcile_classifies_orphaned_death(tmp_path, monkeypatch):
     loaded = registry.load_entry("r", "1-a")
     assert loaded["incarnations"][-1]["classified"] == "api-transient"
     assert loaded["incarnations"][-1]["reconciled"] is True
+
+
+def test_reconcile_classifies_live_pid_with_failed_root_event(tmp_path, monkeypatch):
+    """harness issue #3, defect B: reconcile used to skip any live pid
+    outright, so a run whose ROOT workflow already recorded workflow_failed
+    kept reading as running for as long as the (stuck) process lingered.
+    reconcile and poll_once are mutually exclusive via the `_procs` guard
+    (this entry is never adopted, so poll_once never touches it); the
+    classified-set check at the top of reconcile's loop prevents it being
+    re-processed on the next tick; and the mirror's per-incarnation
+    `terminal` fact prevents a double-post regardless."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path, pid=os.getpid())  # alive by construction
+    _write_root_event(tmpdir, "workflow_failed")
+    (tmpdir / "conductor.stdout.log").write_text("")
+    (tmpdir / "conductor.stderr.log").write_text("OAuth session expired and could not be refreshed")
+    sup = Supervisor()
+    events = sup.reconcile()
+    assert events and events[0]["classified"] == "oauth-expired"
+    loaded = registry.load_entry("r", "1-a")
+    assert loaded["incarnations"][-1]["classified"] == "oauth-expired"
+    assert loaded["incarnations"][-1]["reconciled"] is True
+
+
+def test_classify_from_entry_reads_agent_messages(tmp_path, monkeypatch):
+    """harness issue #3: the OAuth death text arrived ONLY as an
+    `agent_message` event (conductor's stdout/stderr logs stayed empty), so
+    the classifier never saw it. `_classify_from_entry` must also feed the
+    events-file agent_message text into `classify`."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path)
+    (tmpdir / "conductor.stdout.log").write_text("")
+    (tmpdir / "conductor.stderr.log").write_text("")
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "agent_message",
+                "data": {"content": "Failed to authenticate: OAuth session expired"},
+            }
+        )
+        + "\n"
+    )
+    entry = registry.load_entry("r", "1-a")
+    verdict = _classify_from_entry(entry, 1)
+    assert verdict.kind == "oauth-expired"
 
 
 def test_events_carry_remedy_and_detail(tmp_path, monkeypatch):

@@ -2,7 +2,14 @@ import json
 import os
 
 from orchestration.obs import registry
-from orchestration.obs.status import Signals, collect, derive_state, tail_file
+from orchestration.obs.status import (
+    Signals,
+    agent_message_tail,
+    collect,
+    derive_state,
+    tail_file,
+    terminal_root_event_type,
+)
 
 
 def _entry(**inc):
@@ -41,6 +48,60 @@ def _write_events(tmpdir, events):
     checkpoints = tmpdir / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
     (checkpoints / "run.events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def test_terminal_root_event_type_distinguishes_failed(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(tmpdir, [{"type": "workflow_failed", "data": {}}])
+    assert terminal_root_event_type(tmpdir) == "workflow_failed"
+
+
+def test_agent_message_tail_extracts_content(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [
+            {
+                "type": "agent_message",
+                "data": {"content": "Failed to authenticate: OAuth session expired"},
+            },
+            {"type": "workflow_failed", "data": {}},
+        ],
+    )
+    assert "OAuth session expired" in agent_message_tail(tmpdir)
+
+
+def test_agent_message_tail_empty_when_no_events_file(tmp_path):
+    assert agent_message_tail(tmp_path / "tmpdir") == ""
+
+
+def test_agent_message_tail_bounded_to_4kb(tmp_path):
+    """A verbose final agent message must not inflate `verdict.detail` into a
+    near-64KB GitHub death comment — bound matches `tail_file`'s 4KB."""
+    tmpdir = tmp_path / "tmpdir"
+    huge = "x" * 2000
+    _write_events(tmpdir, [{"type": "agent_message", "data": {"content": huge}} for _ in range(5)])
+    result = agent_message_tail(tmpdir)
+    assert len(result) <= 4000
+
+
+def test_derive_state_dead_on_root_failure_despite_live_pid(tmp_path):
+    """harness issue #3, defect B: pid alive + fresh events (the incident
+    shape) must not mask a root workflow_failed — it is death NOW."""
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(tmpdir, [{"type": "workflow_failed", "data": {}}])
+    entry = _entry()
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, None, 5.0, 5.0))
+    assert s["state"] == "dead: workflow-failed (unreconciled)"
+    assert s["stalled"] is False
+
+
+def test_derive_state_oauth_expired_renders_needs_attention():
+    s = derive_state(
+        _entry(exit_code=1, classified="oauth-expired"), Signals(False, None, None, None)
+    )
+    assert s["state"] == "needs-attention: auth"
 
 
 def test_lingering_dashboard_with_root_terminal_event_is_done_not_stalled(tmp_path):
@@ -110,9 +171,9 @@ def test_classified_exits_map_to_states():
     )
     assert (
         derive_state(
-            _entry(exit_code=1, classified="oauth-expired"), Signals(False, None, None, None)
+            _entry(exit_code=1, classified="provider-exit"), Signals(False, None, None, None)
         )["state"]
-        == "dead: oauth-expired"
+        == "dead: provider-exit"
     )
 
 

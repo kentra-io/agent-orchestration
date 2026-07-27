@@ -63,9 +63,15 @@ def classify(
             "expected pause: resolve via the issue label + `conductor resume`",
             text.strip(),
         )
-    if "OAuth" in text and ("expired" in text or "could not be refreshed" in text):
+    if "OAuth" in text and (
+        "expired" in text or "could not be refreshed" in text or "invalid" in text
+    ):
         return Verdict(
-            "oauth-expired", "run `cb login` from the worktree, then resume", text.strip()
+            "oauth-expired",
+            "long-lived token invalid: `orch auth mint`, restart the daemon "
+            "(`orch daemon stop && orch daemon start`), then `orch resume <change-id>` "
+            "(legacy session boxes: `cb login` from the worktree instead)",
+            text.strip(),
         )
     if "API Error" in text or "Connection closed" in text or "overloaded" in text.lower():
         return Verdict("api-transient", "transient provider failure: resume the run", text.strip())

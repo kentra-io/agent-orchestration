@@ -337,6 +337,33 @@ class TestMaterializeBox:
         assert "provisioning:" in config_text
         assert f"claude_dir_source: {agent_claude.resolve()}" in config_text
 
+    def test_box_config_sets_env_auth(self, tmp_path: Path) -> None:
+        """harness #3: every box the launcher creates gets `env_auth: true` so
+        it's born credential-file-free — the daemon supplies auth per-exec via
+        the long-lived token instead. Covers both the fresh-file path and the
+        merge-into-existing-config path."""
+        repo = init_repo(tmp_path / "repo")
+        personas_dir = write_personas(tmp_path / "personas")
+
+        fresh_worktree = create_worktree(repo, tmp_path / "wt-fresh", "change/c-env-auth")
+        materialize_box(fresh_worktree, personas_dir)
+        fresh_config = yaml.safe_load(
+            (fresh_worktree / ".claudebox" / "config.yaml").read_text(encoding="utf-8")
+        )
+        assert fresh_config["provisioning"]["env_auth"] is True
+
+        merge_worktree = create_worktree(repo, tmp_path / "wt-merge", "change/c-env-auth-merge")
+        merge_config_path = merge_worktree / ".claudebox" / "config.yaml"
+        merge_config_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_config_path.write_text(
+            "env:\n  GH_TOKEN: ${GH_TOKEN}\nprovisioning:\n  claude_dir_source: /old/stale/path\n",
+            encoding="utf-8",
+        )
+        materialize_box(merge_worktree, personas_dir)
+        merged_config = yaml.safe_load(merge_config_path.read_text(encoding="utf-8"))
+        assert merged_config["provisioning"]["env_auth"] is True
+        assert merged_config["env"] == {"GH_TOKEN": "${GH_TOKEN}"}  # preserved, not clobbered
+
     def test_merges_into_existing_config_instead_of_clobbering_it(self, tmp_path: Path) -> None:
         """#27 regression: a project's own .claudebox/config.yaml (env/security/
         pre-existing provisioning subkeys) must survive materialize_box -- only

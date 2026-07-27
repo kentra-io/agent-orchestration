@@ -75,27 +75,31 @@ def _newest_mtime_age(root: Path) -> float | None:
     return None if newest is None else max(0.0, time.time() - newest)
 
 
+def _newest_events_file(tmpdir: Path) -> Path | None:
+    candidates = sorted(
+        tmpdir.glob("checkpoints/**/*.events.jsonl"), key=lambda p: p.stat().st_mtime
+    )
+    return candidates[-1] if candidates else None
+
+
 def _events_age(tmpdir: Path) -> float | None:
-    candidates = sorted(
-        tmpdir.glob("checkpoints/**/*.events.jsonl"), key=lambda p: p.stat().st_mtime
-    )
-    if not candidates:
+    newest = _newest_events_file(tmpdir)
+    if newest is None:
         return None
-    return max(0.0, time.time() - candidates[-1].stat().st_mtime)
+    return max(0.0, time.time() - newest.stat().st_mtime)
 
 
-def _has_terminal_root_event(tmpdir: Path) -> bool:
-    """True once the ROOT workflow itself (not a subworkflow) has recorded
-    its own `workflow_completed`/`workflow_failed` — see module docstring
-    for the `subworkflow_path` discriminator. Reuses the same events-file
-    glob as `_events_age`; no new data source.
+def terminal_root_event_type(tmpdir: Path) -> str | None:
+    """The ROOT workflow's terminal event type (`workflow_completed` or
+    `workflow_failed`), or None — see module docstring for the
+    `subworkflow_path` discriminator. Reuses the same events-file glob as
+    `_events_age`; no new data source. Public: consumed by
+    `orchestration.daemon.supervise` too.
     """
-    candidates = sorted(
-        tmpdir.glob("checkpoints/**/*.events.jsonl"), key=lambda p: p.stat().st_mtime
-    )
-    if not candidates:
-        return False
-    tail = tail_file(candidates[-1], max_bytes=_TERMINAL_TAIL_BYTES)
+    newest = _newest_events_file(tmpdir)
+    if newest is None:
+        return None
+    tail = tail_file(newest, max_bytes=_TERMINAL_TAIL_BYTES)
     for line in tail.splitlines():
         line = line.strip()
         if not line:
@@ -107,8 +111,34 @@ def _has_terminal_root_event(tmpdir: Path) -> bool:
         if event.get("type") in _TERMINAL_ROOT_EVENT_TYPES and not event.get("data", {}).get(
             "subworkflow_path"
         ):
-            return True
-    return False
+            return event.get("type")
+    return None
+
+
+def agent_message_tail(tmpdir: Path, max_bytes: int = _TERMINAL_TAIL_BYTES) -> str:
+    """Recent `agent_message` content from the newest events file — the OAuth
+    death text arrives as an agent text block, not on stderr (issue #3).
+    """
+    newest = _newest_events_file(tmpdir)
+    if newest is None:
+        return ""
+    parts: list[str] = []
+    for line in tail_file(newest, max_bytes).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # a tail read can start mid-line; skip the fragment
+        if isinstance(event, dict) and event.get("type") == "agent_message":
+            content = (event.get("data") or {}).get("content", "")
+            if content:
+                parts.append(content)
+    # Bound the joined result the same 4KB as `tail_file` — a verbose final
+    # agent message must not inflate `verdict.detail` into a near-64KB
+    # GitHub death comment.
+    return "\n".join(parts[-5:])[-4000:]
 
 
 def collect(entry: dict[str, Any]) -> Signals:
@@ -134,9 +164,21 @@ def derive_state(
             return {"state": "done", "stalled": False, "classified": classified}
         if classified == "gate-pause":
             return {"state": "paused: gate", "stalled": False, "classified": classified}
+        if classified == "oauth-expired":
+            return {"state": "needs-attention: auth", "stalled": False, "classified": classified}
         return {"state": f"dead: {classified}", "stalled": False, "classified": classified}
 
     if signals.pid_alive:
+        # A root workflow_failed is death NOW, regardless of pid liveness or
+        # events freshness — the 007 incident hid behind both for ~1h
+        # (harness issue #3, defect B).
+        terminal = terminal_root_event_type(Path(entry["tmpdir"]))
+        if terminal == "workflow_failed":
+            return {
+                "state": "dead: workflow-failed (unreconciled)",
+                "stalled": False,
+                "classified": None,
+            }
         stalled = bool(
             signals.events_age_s is not None
             and signals.worktree_mtime_age_s is not None
@@ -146,9 +188,10 @@ def derive_state(
         # A finished-but-lingering `--web-bg` process (launch/change.py sets
         # CONDUCTOR_WEB_BG=1) matches the stall signature exactly: the pid
         # is alive and both ages are old, yet the ROOT workflow already
-        # reached a terminal event. Only worth the extra events-file read
-        # in that (otherwise-misreported) case — issue #14.
-        if stalled and _has_terminal_root_event(Path(entry["tmpdir"])):
+        # reached a terminal event — the `terminal` read above already
+        # tells us whether that's the case, no second events-file read
+        # needed — issue #14.
+        if stalled and terminal is not None:
             return {
                 "state": "done: awaiting dashboard disconnect",
                 "stalled": False,

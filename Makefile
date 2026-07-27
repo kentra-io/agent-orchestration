@@ -13,6 +13,7 @@ daemon-run:
 	  -v $(HOME)/.claude:/root/.claude:ro \
 	  -v $(CODE_ROOT):$(CODE_ROOT) \
 	  -e KENTRA_BOT_GH_TOKEN -e ORCHESTRATION_DAEMON_TOKEN \
+	  -e CLAUDE_CODE_LONG_LIVED_TOKEN \
 	  -p 8765:8765 -p 42000-42050:42000-42050 \
 	  agent-orchestration-daemon
 	@echo "daemon: http://localhost:8765"
