@@ -270,7 +270,9 @@ agents:
       above. Whichever resolved value is empty/`"none"` OMITS the `l1`
       key entirely (a native skip) rather than sending an empty command,
       which `orchestration.harness.l1_acceptance` would reject as a
-      harness error (exit 2), not a trivial pass.
+      harness error (exit 2), not a trivial pass. When workflow.input.box
+      is non-empty the L1 command executes IN-BOX (cb exec) on the
+      agents' toolchain; the stub tier (box="") keeps host-side execution.
     command: python3
     args: ["-m", "orchestration.harness.gates"]
     stdin: >-
@@ -278,8 +280,11 @@ agents:
       {% set _static_check = workflow.input.gates_l1_command | trim %}
       {% set _check = _contract_check if (_contract_check and
       _contract_check != 'none') else _static_check %}
-      {{ ({"l1": {"command": _check}} if (_check and _check != 'none')
-      else {}) | tojson }}
+      {% set _box = workflow.input.box | trim %}
+      {% set _l1 = ({"command": _check, "box": _box,
+      "box_workdir": workflow.input.worktree} if _box
+      else {"command": _check}) %}
+      {{ ({"l1": _l1} if (_check and _check != 'none') else {}) | tojson }}
     routes:
       - to: verifier
 

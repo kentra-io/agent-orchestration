@@ -32,9 +32,11 @@ required-ness.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from conductor.config.loader import load_config
+from conductor.executor.template import TemplateRenderer
 
 REPO_ROOT = Path(__file__).parent.parent
 WORKFLOWS_DIR = REPO_ROOT / "workflows"
@@ -78,3 +80,76 @@ class TestBoxInputPathIsUnbroken:
                 f"makes context['workflow']['input']['{name}'] populated for the "
                 "implementer/verifier/orchestrator cast agents that call the provider"
             )
+
+
+class TestBoxWiredStdinRendersInBox:
+    """The `gates` (milestone.yaml) and `full_healthcheck` (execute-change.yaml)
+    step stdin templates must stay byte-identical to the pre-box payload when
+    `workflow.input.box` is empty (the stub tier), and gain `box`/`box_workdir`
+    keys when a box is wired -- this is the render-level check the stub tier
+    structurally cannot make, since it only ever exercises `box=""`.
+    """
+
+    @staticmethod
+    def _render_stdin(workflow_yaml: Path, step_name: str, workflow_input: dict) -> dict:
+        config = load_config(workflow_yaml)
+        step = next((a for a in config.agents if a.name == step_name), None)
+        assert step is not None, f"{workflow_yaml.name} must ship a '{step_name}' step"
+        assert step.stdin is not None, f"'{step_name}' step must declare a stdin template"
+        renderer = TemplateRenderer()
+        rendered = renderer.render(step.stdin, {"workflow": {"input": workflow_input}})
+        return json.loads(rendered)
+
+    def test_gates_stdin_box_free_matches_pre_box_payload(self) -> None:
+        payload = self._render_stdin(
+            WORKFLOWS_DIR / "milestone.yaml",
+            "gates",
+            {
+                "contract_check": "pytest -q",
+                "gates_l1_command": "none",
+                "box": "",
+                "worktree": "",
+            },
+        )
+        assert payload == {"l1": {"command": "pytest -q"}}
+
+    def test_gates_stdin_box_wired_adds_box_and_box_workdir(self) -> None:
+        payload = self._render_stdin(
+            WORKFLOWS_DIR / "milestone.yaml",
+            "gates",
+            {
+                "contract_check": "pytest -q",
+                "gates_l1_command": "none",
+                "box": "mybox",
+                "worktree": "/w/t",
+            },
+        )
+        assert payload == {"l1": {"command": "pytest -q", "box": "mybox", "box_workdir": "/w/t"}}
+
+    def test_full_healthcheck_stdin_box_free_matches_pre_box_payload(self) -> None:
+        payload = self._render_stdin(
+            WORKFLOWS_DIR / "execute-change.yaml",
+            "full_healthcheck",
+            {
+                "healthcheck_command": "make check",
+                "box": "",
+                "worktree": "",
+            },
+        )
+        assert payload == {"commands": ["make check"]}
+
+    def test_full_healthcheck_stdin_box_wired_adds_box_and_box_workdir(self) -> None:
+        payload = self._render_stdin(
+            WORKFLOWS_DIR / "execute-change.yaml",
+            "full_healthcheck",
+            {
+                "healthcheck_command": "make check",
+                "box": "mybox",
+                "worktree": "/w/t",
+            },
+        )
+        assert payload == {
+            "commands": ["make check"],
+            "box": "mybox",
+            "box_workdir": "/w/t",
+        }

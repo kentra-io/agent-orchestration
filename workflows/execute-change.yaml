@@ -289,7 +289,11 @@ agents:
       `pass` JSON field).
     command: python3
     args: ["-m", "orchestration.harness.l2_healthcheck"]
-    stdin: '{{ {"commands": [workflow.input.healthcheck_command]} | tojson }}'
+    stdin: >-
+      {% set _box = workflow.input.box | trim %}
+      {{ ({"commands": [workflow.input.healthcheck_command], "box": _box,
+      "box_workdir": workflow.input.worktree} if _box
+      else {"commands": [workflow.input.healthcheck_command]}) | tojson }}
     routes:
       - to: archive_handoff
         when: "{{ full_healthcheck.output.exit_code == 0 }}"
