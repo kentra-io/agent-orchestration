@@ -2,8 +2,20 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import orchestration.daemon.resume as dr
 from orchestration.obs import registry
+
+
+@pytest.fixture(autouse=True)
+def _no_long_lived_token(monkeypatch):
+    """Hermeticity: a dev machine / daemon env may export the custody-chain
+    token; strip it by default so the cb-login-heal tests below (which
+    assume legacy no-env-auth behavior) don't flap depending on where they
+    run. Tests exercising the env-auth path set it explicitly."""
+    monkeypatch.delenv("CLAUDE_CODE_LONG_LIVED_TOKEN", raising=False)
+
 
 M1 = {"id": 1, "title": "one"}
 M2 = {"id": 2, "title": "two"}
@@ -183,6 +195,22 @@ def test_box_preflight_still_failing_raises_with_classified_remedy(monkeypatch, 
         msg = str(exc)
         assert "oauth-expired" in msg
         assert "cb login" in msg
+
+
+def test_preflight_skips_cb_login_heal_under_env_auth(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODE_LONG_LIVED_TOKEN", "sk-ant-oat01-x")
+    monkeypatch.setattr(dr, "health_probe", lambda box, **kw: _probe_report(False))
+
+    def fake_run(argv, **kwargs):
+        raise AssertionError(f"cb login heal must not run under env auth, got {argv!r}")
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+
+    report = dr.preflight_box_auth("box-1", str(tmp_path / "wt"))
+
+    assert report["ok"] is False
+    assert report["classified"] == "oauth-expired"
+    assert "login" not in report
 
 
 def test_no_box_skips_preflight(monkeypatch, tmp_path):

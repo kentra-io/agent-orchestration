@@ -115,14 +115,6 @@ def terminal_root_event_type(tmpdir: Path) -> str | None:
     return None
 
 
-def _has_terminal_root_event(tmpdir: Path) -> bool:
-    """True once the ROOT workflow itself (not a subworkflow) has recorded
-    its own terminal event. Thin wrapper over `terminal_root_event_type` —
-    preserves the pre-existing bool call-site semantics.
-    """
-    return terminal_root_event_type(tmpdir) is not None
-
-
 def agent_message_tail(tmpdir: Path, max_bytes: int = _TERMINAL_TAIL_BYTES) -> str:
     """Recent `agent_message` content from the newest events file — the OAuth
     death text arrives as an agent text block, not on stderr (issue #3).

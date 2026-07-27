@@ -70,9 +70,23 @@ def preflight_box_auth(
     cwd; stdin is /dev/null so an interactive OAuth fallback can never hang
     the daemon), then re-probe. Returns the final probe report (callers
     raise on `ok: False` with the classified cause + remedy).
+
+    Under the custody-chain env-auth path (`CLAUDE_CODE_LONG_LIVED_TOKEN`
+    set), the box holds no session file for `cb login` to heal — a failed
+    probe means the long-lived token itself is bad, and the only remedy is
+    `orch auth mint` + a daemon restart. So a failed probe returns
+    immediately with the classified cause, skipping the `cb login` heal
+    entirely (it would either "succeed" and mask the real problem, or fail
+    confusingly against a login flow that no longer applies).
     """
     report = health_probe(box, docker_bin=docker_bin)
     if report["ok"]:
+        return report
+
+    if os.environ.get("CLAUDE_CODE_LONG_LIVED_TOKEN"):
+        # Env-auth boxes hold no session file to heal — a failed probe means
+        # the long-lived token itself is bad. classify's oauth remedy
+        # (mint + daemon restart) is the only fix; `cb login` is legacy-only.
         return report
 
     login: dict[str, Any] = {"attempted": True, "ok": False, "detail": ""}

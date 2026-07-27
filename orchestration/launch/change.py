@@ -426,13 +426,21 @@ def health_probe(
     Fails loud-and-early with a classified cause (design §5.1) instead of the
     run dying 3s into the first agent turn with a masked error.
     """
+    argv = [docker_bin, "exec"]
+    env = None
+    token = os.environ.get("CLAUDE_CODE_LONG_LIVED_TOKEN")
+    if token:
+        argv += ["-e", "CLAUDE_CODE_OAUTH_TOKEN"]
+        env = dict(os.environ, CLAUDE_CODE_OAUTH_TOKEN=token)
+    argv += [box, "claude", "-p", "OK"]
     try:
         proc = subprocess.run(
-            [docker_bin, "exec", box, "claude", "-p", "OK"],
+            argv,
             capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
         )
         verdict = classify(proc.returncode, proc.stdout[-2000:], proc.stderr[-2000:], None)
     except (OSError, subprocess.TimeoutExpired) as exc:
