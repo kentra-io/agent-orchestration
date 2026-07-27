@@ -17,7 +17,7 @@ def _write_root_event(tmpdir, event_type):
     )
 
 
-def _register(tmp_path, change_id="1-a", pid=None):
+def _register(tmp_path, change_id="1-a", pid=None, started_at="x"):
     wt = tmp_path / f"wt-{change_id}"
     tmpdir = wt / ".conductor-tmp"
     tmpdir.mkdir(parents=True)
@@ -28,7 +28,13 @@ def _register(tmp_path, change_id="1-a", pid=None):
     registry.append_incarnation(
         "r",
         change_id,
-        {"pid": pid, "started_at": "x", "web_port": None, "exit_code": None, "classified": None},
+        {
+            "pid": pid,
+            "started_at": started_at,
+            "web_port": None,
+            "exit_code": None,
+            "classified": None,
+        },
     )
     return tmpdir
 
@@ -95,6 +101,22 @@ def test_reconcile_classifies_live_pid_with_failed_root_event(tmp_path, monkeypa
     loaded = registry.load_entry("r", "1-a")
     assert loaded["incarnations"][-1]["classified"] == "oauth-expired"
     assert loaded["incarnations"][-1]["reconciled"] is True
+
+
+def test_reconcile_leaves_live_run_whose_failure_predates_this_incarnation(tmp_path, monkeypatch):
+    """A stale workflow_failed from a PRIOR attempt (same appended events
+    file, timestamp before this incarnation's started_at) must not make
+    reconcile kill a live resumed run (live 007 regression: the fold and
+    reconcile both read the previous attempt's death)."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path, pid=os.getpid(), started_at="2026-07-27T12:28:00+00:00")
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        json.dumps({"type": "workflow_failed", "data": {}, "timestamp": 1000.0}) + "\n"
+    )
+    sup = Supervisor()
+    assert sup.reconcile() == []
 
 
 def test_classify_from_entry_reads_agent_messages(tmp_path, monkeypatch):
