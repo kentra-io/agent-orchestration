@@ -211,7 +211,8 @@ def test_terminal_oauth_expired_adds_needs_human_label(tmp_path, monkeypatch):
             "slug": "proj",
             "change_id": "1-a",
             "classified": "oauth-expired",
-            "remedy": "run `cb login` from the worktree, then resume",
+            "remedy": "long-lived token invalid: `orch auth mint`, restart the daemon "
+            "(`orch daemon stop && orch daemon start`), then `orch resume <change-id>`",
             "detail": "OAuth token could not be refreshed\nthe real captured error",
         },
     )
@@ -227,7 +228,7 @@ def test_terminal_oauth_expired_adds_needs_human_label(tmp_path, monkeypatch):
     assert result["writes"]["needs_human_label"]["label"] == "needs-human-input"
     body = calls["comment"][0][2]
     assert "oauth-expired" in body
-    assert "cb login" in body
+    assert "orch auth mint" in body
     assert "the real captured error" in body
 
 
