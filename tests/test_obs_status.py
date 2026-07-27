@@ -75,6 +75,43 @@ def test_agent_message_tail_empty_when_no_events_file(tmp_path):
     assert agent_message_tail(tmp_path / "tmpdir") == ""
 
 
+def test_agent_message_tail_since_ts_excludes_older_events(tmp_path):
+    """Bug B: resume appends into the SAME relocated events.jsonl as the
+    prior incarnation (stdout/stderr get truncated per-incarnation on
+    resume, but the events file does not) -- an unscoped tail can resurface
+    a prior incarnation's death text. `since_ts` lets a caller scope the
+    read to events at or after a cutoff (the current incarnation's
+    started_at)."""
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [
+            {
+                "type": "agent_message",
+                "data": {"content": "OLD: OAuth session expired"},
+                "timestamp": 1000.0,
+            },
+            {
+                "type": "agent_message",
+                "data": {"content": "NEW: template render error"},
+                "timestamp": 2000.0,
+            },
+        ],
+    )
+    result = agent_message_tail(tmpdir, since_ts=1500.0)
+    assert "template render error" in result
+    assert "OAuth session expired" not in result
+
+
+def test_agent_message_tail_since_ts_none_keeps_old_behavior(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [{"type": "agent_message", "data": {"content": "OAuth session expired"}, "timestamp": 1.0}],
+    )
+    assert "OAuth session expired" in agent_message_tail(tmpdir, since_ts=None)
+
+
 def test_agent_message_tail_bounded_to_4kb(tmp_path):
     """A verbose final agent message must not inflate `verdict.detail` into a
     near-64KB GitHub death comment — bound matches `tail_file`'s 4KB."""

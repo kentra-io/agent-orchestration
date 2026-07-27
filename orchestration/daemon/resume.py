@@ -192,10 +192,32 @@ def resume(
     else:
         mode = "fresh-run-remaining"
         fixture = write_plan_fixture(tmpdir / "plan-resume.json", remaining)
+        # Mirror orchestration.launch.change's full input set (change.py
+        # ~L640-680) -- a fresh conductor `run` gets none of the checkpoint's
+        # baked-in workflow.input, so every input execute-change.yaml's
+        # templates read via `workflow.input.*` that launch derives from
+        # registry-entry facts must be re-supplied here, not just
+        # plan_fixture_path. Omitting `branch` crashed a real run in 0.02s
+        # (`Undefined variable in template: 'dict object' has no attribute
+        # 'branch'`) -- see milestone_step's input_mapping in
+        # workflows/execute-change.yaml.
         inputs = {"plan_fixture_path": str(fixture)}
+        inputs["change_id"] = change_id
+        inputs["branch"] = entry.get("branch") or f"change/{change_id}"
+        if entry.get("repo_gh"):
+            inputs["notify_repo"] = entry["repo_gh"]
+        if entry.get("issue") is not None:
+            inputs["notify_issue"] = str(entry["issue"])
         if entry.get("box"):
             inputs["box"] = entry["box"]
             inputs["worktree"] = worktree
+            # Production tier facts (launch.py L669-680): a resumed box run
+            # must keep persisting/publishing real commits, not silently
+            # regress to the hermetic dry-run defaults.
+            inputs["commit_dry_run"] = "false"
+            inputs["push_dry_run"] = "false"
+            if entry.get("repo_gh") and entry.get("issue") is not None:
+                inputs["notify_dry_run"] = "false"
         argv = build_conductor_argv(
             conductor_bin=conductor_bin,
             workflow=workflow,
