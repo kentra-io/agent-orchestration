@@ -56,7 +56,11 @@ def warn_if_stale() -> str | None:
         return None
     try:
         age_days = (datetime.now(UTC) - datetime.fromisoformat(minted)).days
-    except ValueError:
+    except (ValueError, TypeError):
+        # ValueError: malformed timestamp. TypeError: a naive (no-tz)
+        # `token_minted_at` (e.g. hand-written on a non-macOS host) can't be
+        # subtracted from the aware `datetime.now(UTC)` — treat it the same
+        # as "can't tell the age", not a crash.
         return None
     if age_days >= STALE_AFTER_DAYS:
         return (
@@ -66,7 +70,10 @@ def warn_if_stale() -> str | None:
     return None
 
 
-def _verify(token: str) -> bool:
+def _verify(token: str) -> tuple[bool, str]:
+    """Live-verify the token with `claude -p OK`. Returns (ok, detail) — detail
+    is the stderr tail on failure (empty on success), so the caller can
+    distinguish a bad token from a network/outage failure."""
     proc = subprocess.run(
         ["claude", "-p", "OK"],
         env={**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token},
@@ -75,7 +82,9 @@ def _verify(token: str) -> bool:
         timeout=120,
         check=False,
     )
-    return proc.returncode == 0
+    if proc.returncode == 0:
+        return True, ""
+    return False, (proc.stderr or "")[-200:].strip()
 
 
 def cmd_mint(args: argparse.Namespace) -> int:
@@ -83,16 +92,42 @@ def cmd_mint(args: argparse.Namespace) -> int:
         "Opening the `claude setup-token` browser flow — approve access, then "
         "copy the printed token."
     )
-    subprocess.run(["claude", "setup-token"], check=False)  # interactive passthrough
-    token = getpass.getpass("Paste the token (sk-ant-oat…): ").strip()
-    if not token.startswith(TOKEN_PREFIX):
-        print(f"that doesn't look like a setup-token (expected {TOKEN_PREFIX}…)", file=sys.stderr)
+    try:
+        subprocess.run(["claude", "setup-token"], check=False)  # interactive passthrough
+        token = getpass.getpass("Paste the token (sk-ant-oat…): ").strip()
+        if not token.startswith(TOKEN_PREFIX):
+            print(
+                f"that doesn't look like a setup-token (expected {TOKEN_PREFIX}…)",
+                file=sys.stderr,
+            )
+            return 1
+        print("Verifying against the API …")
+        ok, detail = _verify(token)
+        if not ok:
+            suffix = f" ({detail})" if detail else ""
+            print(f"token failed a live `claude -p OK` — not stored{suffix}", file=sys.stderr)
+            return 1
+        store_token(token)
+    except FileNotFoundError as exc:
+        print(
+            f"`claude` binary not found ({exc.filename or 'claude'}) — is Claude Code "
+            "installed and on PATH?",
+            file=sys.stderr,
+        )
         return 1
-    print("Verifying against the API …")
-    if not _verify(token):
-        print("token failed a live `claude -p OK` — not stored", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print(
+            "verifying the token timed out (`claude -p OK` hung) — check your network "
+            "and try again",
+            file=sys.stderr,
+        )
         return 1
-    store_token(token)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        suffix = f": {stderr}" if stderr else ""
+        print(f"failed to store the token in the keychain (locked?){suffix}", file=sys.stderr)
+        return 1
+
     cfg = config.load_config()
     cfg["token_minted_at"] = datetime.now(UTC).isoformat()
     config.save_config(cfg)

@@ -25,9 +25,13 @@ daemon-launched runs and `--direct` runs mirrored lazily alike — never
 double-posts.
 
 `gate-pause` is deliberately silent: the ladder's `escalate` step already owns
-the `needs-human-input` label, and nothing on this daemon path ever applies
-`needs-human-input` or applies `run-died` to a plan escalation — the two labels
-stay distinct (spec: "Distinct labels for infra death and plan escalation").
+the `needs-human-input` label, and this daemon path never applies `run-died`
+to a plan escalation — the two labels stay distinct for that case (spec:
+"Distinct labels for infra death and plan escalation"). The one deliberate
+overlap: `oauth-expired` deaths are operator-actionable the same way a plan
+escalation is (mint + restart + resume), so `mirror_terminal` applies BOTH
+`run-died` (infra classification) AND `needs-human-input` (routes it to the
+same human-attention queue the escalation gate uses) — see harness issue #3.
 """
 
 from __future__ import annotations
@@ -40,6 +44,11 @@ from orchestration.harness.common import tail
 from orchestration.obs import registry
 
 RUN_DIED_LABEL = "run-died"
+# Same label string the ladder's `escalate` step applies to a plan escalation
+# (orchestration/launch/notify_escalation.py passes it as a literal, not a
+# shared constant — no Python symbol exists there to import). Spelled out
+# identically here so the two paths can't drift apart.
+NEEDS_HUMAN_LABEL = "needs-human-input"
 
 # Labels ensured this process (best-effort `gh label create`), so a fresh
 # consumer repo needs no manual label bootstrap and we attempt creation at most
@@ -160,7 +169,9 @@ def _death_body(change_id: str, kind: str, remedy: str | None, detail: str) -> s
         "",
         "_Posted by the agent-orchestration daemon. The `run-died` label marks an "
         "infrastructure/runtime failure (fix the infra + resume) — distinct from "
-        "`needs-human-input` (a plan escalation)._",
+        "`needs-human-input` (a plan escalation), except for auth death "
+        "(`oauth-expired`), which is operator-actionable the same way and carries "
+        "both labels._",
     ]
     return "\n".join(lines)
 
@@ -222,7 +233,10 @@ def mirror_terminal(entry: dict[str, Any], event: dict[str, Any]) -> dict[str, A
 
     success ⇒ run-finished comment; gate-pause ⇒ nothing (not a death);
     any other classification ⇒ ensure + add `run-died` label and a death comment
-    with the classified cause, remedy, and the real error text.
+    with the classified cause, remedy, and the real error text. `oauth-expired`
+    additionally ensures + adds `needs-human-input` — auth death is
+    operator-actionable (mint + restart + resume), so it's routed to the same
+    human-attention label the escalation gate uses.
     """
     resolved = _resolve(entry)
     if resolved is None:
@@ -245,6 +259,11 @@ def mirror_terminal(entry: dict[str, Any], event: dict[str, Any]) -> dict[str, A
     else:
         ensure_label(repo, RUN_DIED_LABEL)
         writes["label"] = add_label(repo, issue, RUN_DIED_LABEL)
+        if kind == "oauth-expired":
+            # Auth death is operator-actionable (mint + restart + resume) — route
+            # it to the same human-attention label the escalation gate uses.
+            ensure_label(repo, NEEDS_HUMAN_LABEL)
+            writes["needs_human_label"] = add_label(repo, issue, NEEDS_HUMAN_LABEL)
         body = _death_body(
             change_id, kind or "unknown", event.get("remedy"), event.get("detail") or ""
         )

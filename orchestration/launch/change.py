@@ -264,14 +264,17 @@ def materialize_box(worktree: str | Path, personas_dir: str | Path | None = None
     - `<worktree>/.claude/agents/<role>.md` — the cast personas, copied from
       `personas_dir` (default `<repo>/personas`).
     - `<worktree>/.claudebox/config.yaml` — `provisioning.claude_dir_source`
-      pointed at the absolute `.agent-claude` path. If the file already
-      exists (a consuming project's own config, with its own `env:` /
-      `security:` / `resources:` etc.), it is parsed and only
-      `provisioning.claude_dir_source` is set/overwritten — every other
-      top-level key, and any other `provisioning` subkey, is preserved
-      (#27: this used to unconditionally overwrite the whole file with the
-      2-line stub, silently dropping the project's config). Malformed YAML
-      raises `ChangeLaunchError` rather than being clobbered.
+      pointed at the absolute `.agent-claude` path, and `provisioning.env_auth`
+      set to `true` (harness issue #3: the box is born with no
+      `.credentials.json` — the daemon supplies auth per-exec via the
+      long-lived token instead). If the file already exists (a consuming
+      project's own config, with its own `env:` / `security:` / `resources:`
+      etc.), it is parsed and only `provisioning.claude_dir_source` and
+      `provisioning.env_auth` are set/overwritten — every other top-level
+      key, and any other `provisioning` subkey, is preserved (#27: this used
+      to unconditionally overwrite the whole file with the 2-line stub,
+      silently dropping the project's config). Malformed YAML raises
+      `ChangeLaunchError` rather than being clobbered.
 
     Returns `{"claude_dir_source": str, "personas": [names], "config_path": str}`.
     """
@@ -332,10 +335,11 @@ def materialize_box(worktree: str | Path, personas_dir: str | Path | None = None
                 f"overwrite it (got {type(provisioning).__name__})"
             )
         provisioning["claude_dir_source"] = claude_dir_source
+        provisioning["env_auth"] = True
         config_path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
     else:
         config_path.write_text(
-            f"provisioning:\n  claude_dir_source: {claude_dir_source}\n",
+            f"provisioning:\n  claude_dir_source: {claude_dir_source}\n  env_auth: true\n",
             encoding="utf-8",
         )
 

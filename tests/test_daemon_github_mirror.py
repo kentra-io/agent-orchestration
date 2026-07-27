@@ -180,19 +180,55 @@ def test_mirror_terminal_death_labels_run_died_with_real_error(tmp_path, monkeyp
         {
             "slug": "proj",
             "change_id": "1-a",
+            "classified": "provider-exit",
+            "remedy": "cause unknown, but checkpointed — safe to resume",
+            "detail": "claude subprocess exited with code 1\nthe real captured error",
+        },
+    )
+    # Label taxonomy for a generic (non-auth) death: the APPLIED label is
+    # run-died, never needs-human-input — that label stays the escalation
+    # gate's alone for this classification.
+    assert calls["ensure_label"] == [("kentra-io/proj", "run-died")]
+    assert calls["add_label"] == [("kentra-io/proj", 7, "run-died")]
+    assert all(lbl != "needs-human-input" for (_repo, _issue, lbl) in calls["add_label"])
+    body = calls["comment"][0][2]
+    assert "provider-exit" in body  # the classified cause
+    assert "safe to resume" in body  # the remedy
+    assert "the real captured error" in body  # verdict.detail, not a masked exit
+
+
+def test_terminal_oauth_expired_adds_needs_human_label(tmp_path, monkeypatch):
+    """Auth death (harness #3) is operator-actionable the same way a plan
+    escalation is — it gets BOTH run-died (infra classification) AND
+    needs-human-input (routed to the escalation gate's human-attention
+    label), ensured + added in that order."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    entry = _entry(tmp_path)
+    calls = _install_fakes(monkeypatch)
+    result = gm.mirror_terminal(
+        entry,
+        {
+            "slug": "proj",
+            "change_id": "1-a",
             "classified": "oauth-expired",
             "remedy": "run `cb login` from the worktree, then resume",
             "detail": "OAuth token could not be refreshed\nthe real captured error",
         },
     )
-    # Label taxonomy: the APPLIED label is run-died, never needs-human-input.
-    assert calls["ensure_label"] == [("kentra-io/proj", "run-died")]
-    assert calls["add_label"] == [("kentra-io/proj", 7, "run-died")]
-    assert all(lbl != "needs-human-input" for (_repo, _issue, lbl) in calls["add_label"])
+    assert calls["ensure_label"] == [
+        ("kentra-io/proj", "run-died"),
+        ("kentra-io/proj", "needs-human-input"),
+    ]
+    assert calls["add_label"] == [
+        ("kentra-io/proj", 7, "run-died"),
+        ("kentra-io/proj", 7, "needs-human-input"),
+    ]
+    assert result["writes"]["label"]["label"] == "run-died"
+    assert result["writes"]["needs_human_label"]["label"] == "needs-human-input"
     body = calls["comment"][0][2]
-    assert "oauth-expired" in body  # the classified cause
-    assert "cb login" in body  # the remedy
-    assert "the real captured error" in body  # verdict.detail, not a masked exit
+    assert "oauth-expired" in body
+    assert "cb login" in body
+    assert "the real captured error" in body
 
 
 def test_mirror_terminal_gate_pause_is_silent(tmp_path, monkeypatch):
