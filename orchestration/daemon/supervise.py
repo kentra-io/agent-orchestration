@@ -15,7 +15,7 @@ from typing import Any
 
 from orchestration.obs import registry
 from orchestration.obs.classify import classify
-from orchestration.obs.status import pid_alive, tail_file
+from orchestration.obs.status import _terminal_root_event_type, pid_alive, tail_file
 
 
 def _classify_from_entry(entry: dict[str, Any], exit_code: int | None) -> Any:
@@ -79,8 +79,10 @@ class Supervisor:
                 continue
             if (entry["repo_slug"], entry["change_id"]) in self._procs:
                 continue  # actively tracked — poll_once owns it
-            if pid_alive(last.get("pid")):
-                continue  # still running (e.g. a --direct launch) — leave it
+            if pid_alive(last.get("pid")) and _terminal_root_event_type(
+                Path(entry["tmpdir"])
+            ) != "workflow_failed":
+                continue  # still running -- leave it
             verdict = _classify_from_entry(entry, None)
             kind = verdict.kind if verdict.kind != "success" else "unknown"
             registry.update_incarnation(

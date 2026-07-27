@@ -84,17 +84,17 @@ def _events_age(tmpdir: Path) -> float | None:
     return max(0.0, time.time() - candidates[-1].stat().st_mtime)
 
 
-def _has_terminal_root_event(tmpdir: Path) -> bool:
-    """True once the ROOT workflow itself (not a subworkflow) has recorded
-    its own `workflow_completed`/`workflow_failed` — see module docstring
-    for the `subworkflow_path` discriminator. Reuses the same events-file
-    glob as `_events_age`; no new data source.
+def _terminal_root_event_type(tmpdir: Path) -> str | None:
+    """The ROOT workflow's terminal event type (`workflow_completed` or
+    `workflow_failed`), or None — see module docstring for the
+    `subworkflow_path` discriminator. Reuses the same events-file glob as
+    `_events_age`; no new data source.
     """
     candidates = sorted(
         tmpdir.glob("checkpoints/**/*.events.jsonl"), key=lambda p: p.stat().st_mtime
     )
     if not candidates:
-        return False
+        return None
     tail = tail_file(candidates[-1], max_bytes=_TERMINAL_TAIL_BYTES)
     for line in tail.splitlines():
         line = line.strip()
@@ -107,8 +107,16 @@ def _has_terminal_root_event(tmpdir: Path) -> bool:
         if event.get("type") in _TERMINAL_ROOT_EVENT_TYPES and not event.get("data", {}).get(
             "subworkflow_path"
         ):
-            return True
-    return False
+            return event.get("type")
+    return None
+
+
+def _has_terminal_root_event(tmpdir: Path) -> bool:
+    """True once the ROOT workflow itself (not a subworkflow) has recorded
+    its own terminal event. Thin wrapper over `_terminal_root_event_type` —
+    preserves the pre-existing bool call-site semantics.
+    """
+    return _terminal_root_event_type(tmpdir) is not None
 
 
 def collect(entry: dict[str, Any]) -> Signals:
@@ -134,9 +142,20 @@ def derive_state(
             return {"state": "done", "stalled": False, "classified": classified}
         if classified == "gate-pause":
             return {"state": "paused: gate", "stalled": False, "classified": classified}
+        if classified == "oauth-expired":
+            return {"state": "needs-attention: auth", "stalled": False, "classified": classified}
         return {"state": f"dead: {classified}", "stalled": False, "classified": classified}
 
     if signals.pid_alive:
+        # A root workflow_failed is death NOW, regardless of pid liveness or
+        # events freshness — the 007 incident hid behind both for ~1h
+        # (harness issue #3, defect B).
+        if _terminal_root_event_type(Path(entry["tmpdir"])) == "workflow_failed":
+            return {
+                "state": "dead: workflow-failed (unreconciled)",
+                "stalled": False,
+                "classified": None,
+            }
         stalled = bool(
             signals.events_age_s is not None
             and signals.worktree_mtime_age_s is not None

@@ -26,6 +26,32 @@ def test_oauth_expiry():
     assert "cb login" in v.remedy
 
 
+def test_oauth_expired_remedy_names_mint():
+    v = classify(
+        1,
+        "Failed to authenticate: OAuth session expired and could not be refreshed",
+        "",
+        None,
+    )
+    assert v.kind == "oauth-expired"
+    assert "orch auth mint" in v.remedy
+
+
+def test_oauth_invalid_token_is_oauth_expired():
+    """The second live-verified 007-incident shape: a 401 on an invalid (not
+    merely expired) OAuth token must fold to the same oauth-expired verdict —
+    it also contains 'API Error', which would otherwise fall through to the
+    api-transient branch."""
+    v = classify(
+        1,
+        "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+        "",
+        None,
+    )
+    assert v.kind == "oauth-expired"
+    assert "orch auth mint" in v.remedy
+
+
 def test_api_transient():
     v = classify(1, "API Error: Connection closed mid-response", "", None)
     assert v.kind == "api-transient"

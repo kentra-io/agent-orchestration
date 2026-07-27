@@ -2,7 +2,13 @@ import json
 import os
 
 from orchestration.obs import registry
-from orchestration.obs.status import Signals, collect, derive_state, tail_file
+from orchestration.obs.status import (
+    Signals,
+    _terminal_root_event_type,
+    collect,
+    derive_state,
+    tail_file,
+)
 
 
 def _entry(**inc):
@@ -41,6 +47,31 @@ def _write_events(tmpdir, events):
     checkpoints = tmpdir / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
     (checkpoints / "run.events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+def test_terminal_root_event_type_distinguishes_failed(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(tmpdir, [{"type": "workflow_failed", "data": {}}])
+    assert _terminal_root_event_type(tmpdir) == "workflow_failed"
+
+
+def test_derive_state_dead_on_root_failure_despite_live_pid(tmp_path):
+    """harness issue #3, defect B: pid alive + fresh events (the incident
+    shape) must not mask a root workflow_failed — it is death NOW."""
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(tmpdir, [{"type": "workflow_failed", "data": {}}])
+    entry = _entry()
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, None, 5.0, 5.0))
+    assert s["state"] == "dead: workflow-failed (unreconciled)"
+    assert s["stalled"] is False
+
+
+def test_derive_state_oauth_expired_renders_needs_attention():
+    s = derive_state(
+        _entry(exit_code=1, classified="oauth-expired"), Signals(False, None, None, None)
+    )
+    assert s["state"] == "needs-attention: auth"
 
 
 def test_lingering_dashboard_with_root_terminal_event_is_done_not_stalled(tmp_path):
@@ -110,9 +141,9 @@ def test_classified_exits_map_to_states():
     )
     assert (
         derive_state(
-            _entry(exit_code=1, classified="oauth-expired"), Signals(False, None, None, None)
+            _entry(exit_code=1, classified="provider-exit"), Signals(False, None, None, None)
         )["state"]
-        == "dead: oauth-expired"
+        == "dead: provider-exit"
     )
 
 

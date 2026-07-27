@@ -1,9 +1,19 @@
+import json
+import os
 import subprocess
 import sys
 
 import orchestration.daemon.github_mirror as gm
 from orchestration.daemon.supervise import Supervisor
 from orchestration.obs import registry
+
+
+def _write_root_event(tmpdir, event_type):
+    checkpoints = tmpdir / "checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "run.events.jsonl").write_text(
+        json.dumps({"type": event_type, "data": {}}) + "\n"
+    )
 
 
 def _register(tmp_path, change_id="1-a", pid=None):
@@ -61,6 +71,26 @@ def test_reconcile_classifies_orphaned_death(tmp_path, monkeypatch):
     assert events and events[0]["classified"] == "api-transient"
     loaded = registry.load_entry("r", "1-a")
     assert loaded["incarnations"][-1]["classified"] == "api-transient"
+    assert loaded["incarnations"][-1]["reconciled"] is True
+
+
+def test_reconcile_classifies_live_pid_with_failed_root_event(tmp_path, monkeypatch):
+    """harness issue #3, defect B: reconcile used to skip any live pid
+    outright, so a run whose ROOT workflow already recorded workflow_failed
+    kept reading as running for as long as the (stuck) process lingered.
+    poll_once will overwrite this with the real exit code once the process
+    actually exits; the mirror is once-per-incarnation guarded, so no
+    double-post."""
+    monkeypatch.setenv("ORCHESTRATION_REGISTRY_DIR", str(tmp_path / "reg"))
+    tmpdir = _register(tmp_path, pid=os.getpid())  # alive by construction
+    _write_root_event(tmpdir, "workflow_failed")
+    (tmpdir / "conductor.stdout.log").write_text("")
+    (tmpdir / "conductor.stderr.log").write_text("OAuth session expired and could not be refreshed")
+    sup = Supervisor()
+    events = sup.reconcile()
+    assert events and events[0]["classified"] == "oauth-expired"
+    loaded = registry.load_entry("r", "1-a")
+    assert loaded["incarnations"][-1]["classified"] == "oauth-expired"
     assert loaded["incarnations"][-1]["reconciled"] is True
 
 
