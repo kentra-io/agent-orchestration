@@ -4,10 +4,11 @@ import os
 from orchestration.obs import registry
 from orchestration.obs.status import (
     Signals,
-    _terminal_root_event_type,
+    agent_message_tail,
     collect,
     derive_state,
     tail_file,
+    terminal_root_event_type,
 )
 
 
@@ -52,7 +53,26 @@ def _write_events(tmpdir, events):
 def test_terminal_root_event_type_distinguishes_failed(tmp_path):
     tmpdir = tmp_path / "tmpdir"
     _write_events(tmpdir, [{"type": "workflow_failed", "data": {}}])
-    assert _terminal_root_event_type(tmpdir) == "workflow_failed"
+    assert terminal_root_event_type(tmpdir) == "workflow_failed"
+
+
+def test_agent_message_tail_extracts_content(tmp_path):
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [
+            {
+                "type": "agent_message",
+                "data": {"content": "Failed to authenticate: OAuth session expired"},
+            },
+            {"type": "workflow_failed", "data": {}},
+        ],
+    )
+    assert "OAuth session expired" in agent_message_tail(tmpdir)
+
+
+def test_agent_message_tail_empty_when_no_events_file(tmp_path):
+    assert agent_message_tail(tmp_path / "tmpdir") == ""
 
 
 def test_derive_state_dead_on_root_failure_despite_live_pid(tmp_path):

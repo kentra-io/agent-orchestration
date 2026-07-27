@@ -15,14 +15,23 @@ from typing import Any
 
 from orchestration.obs import registry
 from orchestration.obs.classify import classify
-from orchestration.obs.status import _terminal_root_event_type, pid_alive, tail_file
+from orchestration.obs.status import (
+    agent_message_tail,
+    pid_alive,
+    tail_file,
+    terminal_root_event_type,
+)
 
 
 def _classify_from_entry(entry: dict[str, Any], exit_code: int | None) -> Any:
     tmpdir = Path(entry["tmpdir"])
+    stdout_tail = tail_file(tmpdir / "conductor.stdout.log")
+    events_tail = agent_message_tail(tmpdir)
+    if events_tail:
+        stdout_tail = f"{stdout_tail}\n{events_tail}"
     return classify(
         exit_code,
-        tail_file(tmpdir / "conductor.stdout.log"),
+        stdout_tail,
         tail_file(tmpdir / "conductor.stderr.log"),
         None,
     )
@@ -79,10 +88,11 @@ class Supervisor:
                 continue
             if (entry["repo_slug"], entry["change_id"]) in self._procs:
                 continue  # actively tracked — poll_once owns it
-            if pid_alive(last.get("pid")) and _terminal_root_event_type(
-                Path(entry["tmpdir"])
-            ) != "workflow_failed":
-                continue  # still running -- leave it
+            if (
+                pid_alive(last.get("pid"))
+                and terminal_root_event_type(Path(entry["tmpdir"])) != "workflow_failed"
+            ):
+                continue  # still running — leave it
             verdict = _classify_from_entry(entry, None)
             kind = verdict.kind if verdict.kind != "success" else "unknown"
             registry.update_incarnation(
