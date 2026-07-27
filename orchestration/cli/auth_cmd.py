@@ -153,7 +153,6 @@ def cmd_status(args: argparse.Namespace) -> int:
 def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("auth", help="long-lived Claude token custody (mint/status)")
     asub = p.add_subparsers(dest="auth_cmd", required=True)
-    asub.add_parser("mint", help="run `claude setup-token`, verify, store in keychain").set_defaults(
-        func=cmd_mint
-    )
+    mint = asub.add_parser("mint", help="run `claude setup-token`, verify, store in keychain")
+    mint.set_defaults(func=cmd_mint)
     asub.add_parser("status", help="token presence + age").set_defaults(func=cmd_status)
