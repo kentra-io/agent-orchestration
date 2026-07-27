@@ -141,6 +141,22 @@ def test_derive_state_dead_on_root_failure_despite_live_pid(tmp_path):
     assert s["stalled"] is False
 
 
+def test_derive_state_live_run_not_killed_by_prior_incarnation_failure(tmp_path):
+    """A resumed run appends into the prior incarnation's events file — a
+    STALE workflow_failed (timestamp before this incarnation's started_at)
+    must not mark the live run dead (live 007 regression: the fold showed
+    'dead: workflow-failed' while the implementer was on turn 8)."""
+    tmpdir = tmp_path / "tmpdir"
+    _write_events(
+        tmpdir,
+        [{"type": "workflow_failed", "data": {}, "timestamp": 1000.0}],
+    )
+    entry = _entry(started_at="2026-07-27T12:28:00+00:00")  # epoch ≫ 1000.0
+    entry["tmpdir"] = str(tmpdir)
+    s = derive_state(entry, Signals(True, "implementer", 5.0, 5.0))
+    assert s["state"] == "running"
+
+
 def test_derive_state_oauth_expired_renders_needs_attention():
     s = derive_state(
         _entry(exit_code=1, classified="oauth-expired"), Signals(False, None, None, None)

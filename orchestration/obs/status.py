@@ -12,6 +12,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -89,12 +90,37 @@ def _events_age(tmpdir: Path) -> float | None:
     return max(0.0, time.time() - newest.stat().st_mtime)
 
 
-def terminal_root_event_type(tmpdir: Path) -> str | None:
+def incarnation_cutoff(entry: dict[str, Any]) -> float | None:
+    """Epoch cutoff for `since_ts` scoping — the LAST (i.e. current)
+    incarnation's `started_at`. Resume appends events into the same
+    relocated events.jsonl as the prior incarnation, so reads about the
+    current incarnation must not consume events emitted before it started
+    (a stale `workflow_failed` marked a LIVE resumed run dead; stale OAuth
+    agent text misclassified a template error). Returns None (old,
+    unscoped behavior) when there is no incarnation or `started_at` is
+    absent/unparseable."""
+    incarnations = entry.get("incarnations") or []
+    if not incarnations:
+        return None
+    started_at = incarnations[-1].get("started_at")
+    if not started_at:
+        return None
+    try:
+        return datetime.fromisoformat(started_at).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def terminal_root_event_type(tmpdir: Path, since_ts: float | None = None) -> str | None:
     """The ROOT workflow's terminal event type (`workflow_completed` or
     `workflow_failed`), or None — see module docstring for the
     `subworkflow_path` discriminator. Reuses the same events-file glob as
     `_events_age`; no new data source. Public: consumed by
     `orchestration.daemon.supervise` too.
+
+    `since_ts` scopes the read to the current incarnation (see
+    `incarnation_cutoff`): a prior attempt's `workflow_failed` in the same
+    appended events file must not mark a live resumed run dead.
     """
     newest = _newest_events_file(tmpdir)
     if newest is None:
@@ -108,6 +134,8 @@ def terminal_root_event_type(tmpdir: Path) -> str | None:
             event = json.loads(line)
         except ValueError:
             continue  # a tail read can start mid-line; skip the fragment
+        if since_ts is not None and (event.get("timestamp") or 0) < since_ts:
+            continue  # a prior incarnation's event — not this run's verdict
         if event.get("type") in _TERMINAL_ROOT_EVENT_TYPES and not event.get("data", {}).get(
             "subworkflow_path"
         ):
@@ -190,7 +218,9 @@ def derive_state(
         # A root workflow_failed is death NOW, regardless of pid liveness or
         # events freshness — the 007 incident hid behind both for ~1h
         # (harness issue #3, defect B).
-        terminal = terminal_root_event_type(Path(entry["tmpdir"]))
+        terminal = terminal_root_event_type(
+            Path(entry["tmpdir"]), since_ts=incarnation_cutoff(entry)
+        )
         if terminal == "workflow_failed":
             return {
                 "state": "dead: workflow-failed (unreconciled)",
