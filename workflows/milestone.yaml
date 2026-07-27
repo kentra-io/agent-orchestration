@@ -220,7 +220,7 @@ agents:
     # <worktree>/.claude/agents/implementer.md). The provider passes
     # `--agent implementer`, so the persona's MUST/HALT contract (spec sec 6.2)
     # is the system prompt; this inline prompt supplies only per-invocation
-    # task context. `--model opus` overrides the frontmatter model; the
+    # task context. The step's `model:` overrides the frontmatter model; the
     # persona's `effort: medium` (spec sec 6) rides the frontmatter.
     description: Does the milestone's work -- solo on attempt 1, guided by the Orchestrator on attempts 2-3.
     model: sonnet # 2026-07-27 decision (run-hardening): Sonnet implements, Opus
