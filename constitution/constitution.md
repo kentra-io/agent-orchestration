@@ -42,3 +42,11 @@ ADR-0003 · 2026-07-07
 Every GitHub side effect this module performs (comments, labels, issue close, branch push) MUST authenticate as the bot identity (KENTRA_BOT_GH_TOKEN via GH_TOKEN / gh auth setup-git — never a human's credentials), MUST be independent best effort (attempted, result recorded, never raised, never a step/run failure, never a reason to skip a sibling write), and MUST default to a hermetic dry_run performing no network I/O and requiring no token.
 
 ADR-0005 · 2026-07-24
+
+## security
+
+### Agent-box Claude auth is a dedicated long-lived setup-token, never a copied session
+
+Orchestration agent boxes MUST authenticate Claude via the dedicated long-lived setup-token custody chain (Keychain `kentra-orch-claude-token` minted by `orch auth mint` → `orch daemon start` → by-value `CLAUDE_CODE_LONG_LIVED_TOKEN` → per-invocation `CLAUDE_CODE_OAUTH_TOKEN` via bare-name `docker exec -e`), MUST be created with `provisioning.env_auth: true` and carry no credentials file, and MUST NOT receive a copied/snapshotted OAuth session — `cb login` and file-snapshot credentials are for interactive boxes only.
+
+ADR-0006 · 2026-07-27
