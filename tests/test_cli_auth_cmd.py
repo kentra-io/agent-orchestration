@@ -152,9 +152,7 @@ def test_mint_store_token_locked_keychain(monkeypatch, tmp_path, capsys):
         if argv[:2] == ["claude", "-p"]:
             return R(0)  # live-verify ok
         if argv[:2] == ["security", "add-generic-password"]:
-            raise subprocess.CalledProcessError(
-                1, argv, stderr="User interaction is not allowed."
-            )
+            raise subprocess.CalledProcessError(1, argv, stderr="User interaction is not allowed.")
         raise AssertionError(f"unexpected call: {argv}")
 
     monkeypatch.setattr(auth_cmd.subprocess, "run", fake_run)
